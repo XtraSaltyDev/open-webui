@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleExecutable</key>
+  <string>OpenWebUINative</string>
+  <key>CFBundleIdentifier</key>
+  <string>dev.xtrasalty.OpenWebUINative</string>
+  <key>CFBundleName</key>
+  <string>OpenWebUINative</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>dev.xtrasalty.OpenWebUINative</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>openwebui-native</string>
+      </array>
+    </dict>
+  </array>
+  <key>LSMinimumSystemVersion</key>
+  <string>14.0</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>OpenWebUINative records microphone audio when you use native audio transcription or Voice Chat.</string>
+  <key>NSPrincipalClass</key>
+  <string>NSApplication</string>
+</dict>
+</plist>
