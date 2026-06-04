@@ -8,11 +8,16 @@ struct ToolServerInvocationService: ToolServerInvoking {
     typealias DataLoader = @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
     private let dataLoader: DataLoader
+    private let stdioTimeoutSeconds: TimeInterval
 
-    init(dataLoader: @escaping DataLoader = { request in
+    init(
+        dataLoader: @escaping DataLoader = { request in
         try await ToolServerInvocationService.defaultDataLoader(request)
-    }) {
+        },
+        stdioTimeoutSeconds: TimeInterval = 30
+    ) {
         self.dataLoader = dataLoader
+        self.stdioTimeoutSeconds = stdioTimeoutSeconds
     }
 
     func invoke(_ request: ToolServerInvocationRequest) async -> AppToolServerRun {
@@ -26,12 +31,25 @@ struct ToolServerInvocationService: ToolServerInvoking {
     }
 
     private func invokeStdio(_ request: ToolServerInvocationRequest, startedAt: Date) async -> AppToolServerRun {
-        await Task.detached(priority: .userInitiated) {
-            Self.runStdioProcess(request, startedAt: startedAt)
-        }.value
+        let worker = Task(priority: .userInitiated) {
+            Self.runStdioProcess(
+                request,
+                startedAt: startedAt,
+                stdioTimeoutSeconds: stdioTimeoutSeconds
+            )
+        }
+        return await withTaskCancellationHandler(operation: {
+            await worker.value
+        }, onCancel: {
+            worker.cancel()
+        })
     }
 
-    private static func runStdioProcess(_ request: ToolServerInvocationRequest, startedAt: Date) -> AppToolServerRun {
+    private static func runStdioProcess(
+        _ request: ToolServerInvocationRequest,
+        startedAt: Date,
+        stdioTimeoutSeconds: TimeInterval
+    ) -> AppToolServerRun {
         guard let command = request.server.command?.trimmingCharacters(in: .whitespacesAndNewlines),
               !command.isEmpty else {
             return failedRun(
@@ -49,7 +67,6 @@ struct ToolServerInvocationService: ToolServerInvoking {
         let error = Pipe()
         let outputCollector = PipeDataCollector(pipe: output)
         let errorCollector = PipeDataCollector(pipe: error)
-        let termination = DispatchSemaphore(value: 0)
 
         if command.contains("/") {
             process.executableURL = URL(fileURLWithPath: command)
@@ -64,9 +81,6 @@ struct ToolServerInvocationService: ToolServerInvoking {
         process.environment = ProcessInfo.processInfo.environment.merging(request.server.environment) { _, new in
             new
         }
-        process.terminationHandler = { _ in
-            termination.signal()
-        }
 
         do {
             try process.run()
@@ -75,21 +89,41 @@ struct ToolServerInvocationService: ToolServerInvoking {
             }
             try? input.fileHandleForWriting.close()
 
-            if termination.wait(timeout: .now() + 30) == .timedOut {
+            let timeoutSeconds = max(stdioTimeoutSeconds, 0.1)
+            let deadline = Date().addingTimeInterval(timeoutSeconds)
+            var timedOut = false
+            var cancelled = false
+            while process.isRunning {
+                if Task.isCancelled {
+                    cancelled = true
+                    break
+                }
+                if Date() >= deadline {
+                    timedOut = true
+                    break
+                }
+                Thread.sleep(forTimeInterval: 0.02)
+            }
+
+            if timedOut || cancelled {
                 if process.isRunning {
                     process.terminate()
-                    process.waitUntilExit()
                 }
+                process.waitUntilExit()
                 let responseBody = outputCollector.collectedString()
                 _ = errorCollector.collectedString()
                 return failedRun(
                     request,
                     statusCode: nil,
                     responseBody: responseBody,
-                    errorMessage: "Timed out after 30 seconds.",
+                    errorMessage: timedOut
+                        ? timeoutMessage(seconds: timeoutSeconds)
+                        : "Invocation cancelled.",
                     startedAt: startedAt
                 )
             }
+
+            process.waitUntilExit()
 
             let responseBody = outputCollector.collectedString()
             let errorBody = errorCollector.collectedString()
@@ -119,6 +153,14 @@ struct ToolServerInvocationService: ToolServerInvoking {
                 startedAt: startedAt
             )
         }
+    }
+
+    private static func timeoutMessage(seconds: TimeInterval) -> String {
+        let rounded = seconds.rounded()
+        if abs(seconds - rounded) < 0.000_001 {
+            return "Timed out after \(Int(rounded)) seconds."
+        }
+        return String(format: "Timed out after %.1f seconds.", seconds)
     }
 
     private static func failureMessage(for stderr: String, exitCode: Int) -> String {

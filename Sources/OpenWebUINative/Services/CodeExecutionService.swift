@@ -17,6 +17,11 @@ private func executeSynchronously(_ request: CodeExecutionRequest) -> AppCodeExe
     let process = Process()
     let stdoutPipe = Pipe()
     let stderrPipe = Pipe()
+    let maxCapturedOutputBytes = max(
+        request.maxCapturedOutputBytes ?? CodeExecutionSettings().maxCapturedOutputBytes,
+        1
+    )
+    let outputCapture = ProcessOutputCapture(maxCapturedOutputBytes: maxCapturedOutputBytes)
     var timedOut = false
 
     switch request.language {
@@ -30,11 +35,33 @@ private func executeSynchronously(_ request: CodeExecutionRequest) -> AppCodeExe
 
     if let path = request.workingDirectoryPath?.trimmingCharacters(in: .whitespacesAndNewlines),
        !path.isEmpty {
-        process.currentDirectoryURL = URL(fileURLWithPath: path, isDirectory: true)
+        process.currentDirectoryURL = URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL
     }
 
     process.standardOutput = stdoutPipe
     process.standardError = stderrPipe
+
+    stdoutPipe.fileHandleForReading.readabilityHandler = { fileHandle in
+        let data = fileHandle.availableData
+        guard !data.isEmpty else {
+            return
+        }
+
+        if outputCapture.append(data, to: .stdout) {
+            process.terminate()
+        }
+    }
+
+    stderrPipe.fileHandleForReading.readabilityHandler = { fileHandle in
+        let data = fileHandle.availableData
+        guard !data.isEmpty else {
+            return
+        }
+
+        if outputCapture.append(data, to: .stderr) {
+            process.terminate()
+        }
+    }
 
     do {
         try process.run()
@@ -65,8 +92,26 @@ private func executeSynchronously(_ request: CodeExecutionRequest) -> AppCodeExe
 
     process.waitUntilExit()
 
-    let stdout = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    stdoutPipe.fileHandleForReading.readabilityHandler = nil
+    stderrPipe.fileHandleForReading.readabilityHandler = nil
+
+    if let remainingStdout = try? stdoutPipe.fileHandleForReading.readToEnd(),
+       !remainingStdout.isEmpty {
+        _ = outputCapture.append(remainingStdout, to: .stdout)
+    }
+
+    if let remainingStderr = try? stderrPipe.fileHandleForReading.readToEnd(),
+       !remainingStderr.isEmpty {
+        _ = outputCapture.append(remainingStderr, to: .stderr)
+    }
+
+    let capturedOutput = outputCapture.snapshot()
+    let stdout = String(data: capturedOutput.stdout, encoding: .utf8) ?? ""
+    var stderr = String(data: capturedOutput.stderr, encoding: .utf8) ?? ""
+    if capturedOutput.isTruncated {
+        let truncationMessage = "Output truncated after reaching the \(maxCapturedOutputBytes)-byte capture limit."
+        stderr = stderr.isEmpty ? truncationMessage : "\(stderr)\n\(truncationMessage)"
+    }
     let status: CodeExecutionStatus
     let exitCode: Int32?
     if timedOut {
@@ -88,4 +133,62 @@ private func executeSynchronously(_ request: CodeExecutionRequest) -> AppCodeExe
         startedAt: startedAt,
         completedAt: Date()
     )
+}
+
+private final class ProcessOutputCapture {
+    enum Stream {
+        case stdout
+        case stderr
+    }
+
+    private let maxCapturedOutputBytes: Int
+    private let lock = NSLock()
+    private var stdout = Data()
+    private var stderr = Data()
+    private var capturedBytes = 0
+    private var isTruncated = false
+
+    init(maxCapturedOutputBytes: Int) {
+        self.maxCapturedOutputBytes = max(maxCapturedOutputBytes, 1)
+    }
+
+    func append(_ data: Data, to stream: Stream) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+
+        guard !data.isEmpty else {
+            return false
+        }
+
+        let remainingBytes = maxCapturedOutputBytes - capturedBytes
+        guard remainingBytes > 0 else {
+            isTruncated = true
+            return true
+        }
+
+        let capturedChunkCount = min(remainingBytes, data.count)
+        if capturedChunkCount > 0 {
+            let chunk = data.prefix(capturedChunkCount)
+            switch stream {
+            case .stdout:
+                stdout.append(chunk)
+            case .stderr:
+                stderr.append(chunk)
+            }
+            capturedBytes += capturedChunkCount
+        }
+
+        if capturedChunkCount < data.count {
+            isTruncated = true
+            return true
+        }
+
+        return false
+    }
+
+    func snapshot() -> (stdout: Data, stderr: Data, isTruncated: Bool) {
+        lock.lock()
+        defer { lock.unlock() }
+        return (stdout, stderr, isTruncated)
+    }
 }

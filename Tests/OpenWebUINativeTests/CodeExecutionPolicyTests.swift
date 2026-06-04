@@ -20,7 +20,14 @@ final class CodeExecutionPolicyTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(decision, .allowed(timeoutSeconds: 5, workingDirectoryPath: "/tmp/project"))
+        switch decision {
+        case let .allowed(timeoutSeconds, workingDirectoryPath, maxCapturedOutputBytes):
+            XCTAssertEqual(timeoutSeconds, 5)
+            XCTAssertEqual(workingDirectoryPath, "/tmp/project")
+            XCTAssertEqual(maxCapturedOutputBytes, 1_048_576)
+        case let .blocked(reason):
+            XCTFail("Expected policy to allow execution, but blocked: \(reason)")
+        }
     }
 
     func testPolicyBlocksDisabledLanguage() {
@@ -58,6 +65,48 @@ final class CodeExecutionPolicyTests: XCTestCase {
                 language: .shell,
                 code: "pwd",
                 workingDirectoryPath: "/private/project",
+                timeoutSeconds: 1
+            )
+        )
+
+        XCTAssertEqual(decision, .blocked(reason: "Working directory is outside the allowed code execution roots."))
+    }
+
+    func testPolicyBlocksWorkingDirectoryTraversalOutsideAllowedRoot() {
+        let policy = CodeExecutionPolicy(
+            settings: CodeExecutionSettings(
+                allowedLanguages: [.shell],
+                allowedWorkingDirectoryRoots: ["/tmp/safe"],
+                maxTimeoutSeconds: 5
+            )
+        )
+
+        let decision = policy.evaluate(
+            CodeExecutionRequest(
+                language: .shell,
+                code: "pwd",
+                workingDirectoryPath: "/tmp/safe/../private",
+                timeoutSeconds: 1
+            )
+        )
+
+        XCTAssertEqual(decision, .blocked(reason: "Working directory is outside the allowed code execution roots."))
+    }
+
+    func testPolicyBlocksSiblingPathPrefixOutsideAllowedRoot() {
+        let policy = CodeExecutionPolicy(
+            settings: CodeExecutionSettings(
+                allowedLanguages: [.shell],
+                allowedWorkingDirectoryRoots: ["/tmp/safe"],
+                maxTimeoutSeconds: 5
+            )
+        )
+
+        let decision = policy.evaluate(
+            CodeExecutionRequest(
+                language: .shell,
+                code: "pwd",
+                workingDirectoryPath: "/tmp/safe-project",
                 timeoutSeconds: 1
             )
         )
@@ -129,6 +178,13 @@ final class CodeExecutionPolicyTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(decision, .allowed(timeoutSeconds: 1, workingDirectoryPath: "/tmp"))
+        switch decision {
+        case let .allowed(timeoutSeconds, workingDirectoryPath, maxCapturedOutputBytes):
+            XCTAssertEqual(timeoutSeconds, 1)
+            XCTAssertEqual(workingDirectoryPath, "/tmp")
+            XCTAssertEqual(maxCapturedOutputBytes, 1_048_576)
+        case let .blocked(reason):
+            XCTFail("Expected policy to allow execution, but blocked: \(reason)")
+        }
     }
 }

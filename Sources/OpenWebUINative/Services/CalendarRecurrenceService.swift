@@ -132,30 +132,44 @@ struct CalendarRecurrenceService: Sendable {
         in range: ClosedRange<Date>
     ) -> [AppCalendarEvent] {
         guard rule.hasValidInterval,
+              rule.hasValidMonths,
               let recurrenceLimit = rule.recurrenceLimit(in: calendar) else {
             return eventOverlaps(event, range: range) ? [event] : []
         }
 
+        let sourceMonth = calendar.component(.month, from: event.startAt)
+        let sourceDay = calendar.component(.day, from: event.startAt)
+        let months = rule.months.isEmpty ? [sourceMonth] : rule.months.sorted()
+        let anchorYear = calendar.component(.year, from: event.startAt)
+        let upperYearBound = calendar.component(.year, from: range.upperBound)
+        let anchorTime = calendar.dateComponents([.hour, .minute, .second, .nanosecond], from: event.startAt)
+
         var result: [AppCalendarEvent] = []
         var limit = recurrenceLimit
-        var candidateStart = event.startAt
+        var year = anchorYear
 
-        while candidateStart <= range.upperBound {
-            guard limit.consume(candidateStart) else {
-                break
+        while year <= upperYearBound {
+            for month in months {
+                guard let monthStart = calendar.date(from: DateComponents(year: year, month: month, day: 1)),
+                      let candidateStart = date(inMonthStartingAt: monthStart, day: sourceDay, withTimeFrom: anchorTime),
+                      candidateStart >= event.startAt else {
+                    continue
+                }
+
+                guard limit.consume(candidateStart) else {
+                    return result.sorted { $0.startAt < $1.startAt }
+                }
+
+                let occurrence = occurrence(from: event, startAt: candidateStart)
+                if eventOverlaps(occurrence, range: range) {
+                    result.append(occurrence)
+                }
             }
 
-            let occurrence = occurrence(from: event, startAt: candidateStart)
-            if eventOverlaps(occurrence, range: range) {
-                result.append(occurrence)
-            }
-            guard let nextStart = calendar.date(byAdding: .year, value: rule.interval, to: candidateStart) else {
-                return result
-            }
-            candidateStart = nextStart
+            year += rule.interval
         }
 
-        return result
+        return result.sorted { $0.startAt < $1.startAt }
     }
 
     private func weeklyOccurrences(
@@ -323,8 +337,39 @@ private struct CalendarRRule {
         }
     }
 
+    var months: [Int] {
+        guard let byMonth = values["BYMONTH"] else {
+            return []
+        }
+        return Array(
+            Set(
+                byMonth
+                    .split(separator: ",")
+                    .compactMap { Int($0) }
+                    .filter { (1...12).contains($0) }
+            )
+        )
+        .sorted()
+    }
+
+    var hasValidMonths: Bool {
+        guard let byMonth = values["BYMONTH"] else {
+            return true
+        }
+        let tokens = byMonth.split(separator: ",")
+        guard !tokens.isEmpty else {
+            return false
+        }
+        return tokens.allSatisfy { token in
+            guard let value = Int(token) else {
+                return false
+            }
+            return (1...12).contains(value)
+        }
+    }
+
     var hasSupportedYearlyComponents: Bool {
-        let supportedKeys: Set<String> = ["FREQ", "INTERVAL", "COUNT", "UNTIL"]
+        let supportedKeys: Set<String> = ["FREQ", "INTERVAL", "COUNT", "UNTIL", "BYMONTH"]
         return values.keys.allSatisfy { supportedKeys.contains($0) }
     }
 

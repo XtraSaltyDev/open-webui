@@ -194,6 +194,66 @@ final class WebSearchServiceTests: XCTestCase {
         }
     }
 
+    func testTavilySearchUsesOfficialEndpointBearerTokenAndParsesResults() async throws {
+        let payload = """
+        {
+          "results": [
+            {"title": "One", "url": "https://one.example/post", "content": "First snippet"},
+            {"title": "Two", "url": "https://two.example/post", "content": "Second snippet"}
+          ]
+        }
+        """.data(using: .utf8)!
+        let requestCapture = WebSearchRequestCapture()
+        let service = WebSearchService(
+            secretStore: InMemorySecretStore(["web-search-tavily-key": "tavily-token"])
+        ) { request in
+            await requestCapture.set(request)
+            return (payload, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        let settings = WebSearchSettings(
+            engine: .tavily,
+            resultCount: 1,
+            tavilyAPIKeySecretID: "web-search-tavily-key",
+            domainFilterList: []
+        )
+
+        let results = try await service.search(query: "native macOS", settings: settings)
+        let capturedRequest = await requestCapture.request
+        let requestBody = try XCTUnwrap(capturedRequest?.httpBody)
+        let requestJSON = try XCTUnwrap(JSONSerialization.jsonObject(with: requestBody) as? [String: Any])
+
+        XCTAssertEqual(capturedRequest?.url?.absoluteString, "https://api.tavily.com/search")
+        XCTAssertEqual(capturedRequest?.httpMethod, "POST")
+        XCTAssertEqual(capturedRequest?.value(forHTTPHeaderField: "Content-Type"), "application/json")
+        XCTAssertEqual(capturedRequest?.value(forHTTPHeaderField: "Accept"), "application/json")
+        XCTAssertEqual(capturedRequest?.value(forHTTPHeaderField: "Authorization"), "Bearer tavily-token")
+        XCTAssertEqual(requestJSON["query"] as? String, "native macOS")
+        XCTAssertEqual(requestJSON["max_results"] as? Int, 1)
+        XCTAssertEqual(results, [
+            WebSearchResult(title: "One", url: URL(string: "https://one.example/post")!, snippet: "First snippet")
+        ])
+    }
+
+    func testTavilySearchRequiresStoredAPIKey() async throws {
+        let service = WebSearchService(secretStore: InMemorySecretStore()) { request in
+            XCTFail("Unexpected request: \(request)")
+            return (Data(), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+        }
+        let settings = WebSearchSettings(
+            engine: .tavily,
+            resultCount: 1,
+            tavilyAPIKeySecretID: "missing-key",
+            domainFilterList: []
+        )
+
+        do {
+            _ = try await service.search(query: "native macOS", settings: settings)
+            XCTFail("Expected missing Tavily API key error.")
+        } catch {
+            XCTAssertEqual(error.localizedDescription, "Add a Tavily API key before searching with Tavily.")
+        }
+    }
+
     func testSearchLoadsPageContentWhenEnabled() async throws {
         let searchHTML = """
         <div class="result">

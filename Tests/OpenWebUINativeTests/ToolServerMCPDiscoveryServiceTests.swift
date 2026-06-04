@@ -256,6 +256,30 @@ final class ToolServerMCPDiscoveryServiceTests: XCTestCase {
         XCTAssertEqual(result.tools.first?.inputSchema.objectValue?["type"], .string("object"))
     }
 
+    func testDiscoverStdioServerTimesOutAndTerminatesHangingProcess() async throws {
+        let markerURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("terminated.marker")
+        let scriptURL = try makeHangingStdioMCPFixtureScript(markerURL: markerURL)
+        let server = AppToolServer(
+            id: "stdio",
+            name: "Hanging Stdio MCP",
+            kind: .stdio,
+            command: "/usr/bin/python3",
+            arguments: [scriptURL.path],
+            environment: ["NATIVE_STDIO_TERMINATION_MARKER": markerURL.path]
+        )
+        let service = ToolServerMCPDiscoveryService(
+            stdioTimeoutSeconds: 0.2
+        )
+
+        let result = await service.discoverTools(for: server)
+
+        XCTAssertEqual(result.status, .unavailable("Timed out waiting for stdio response."))
+        XCTAssertTrue(result.tools.isEmpty)
+        XCTAssertEqual(try String(contentsOf: markerURL, encoding: .utf8), "terminated")
+    }
+
     private func makeStdioMCPFixtureScript() throws -> URL {
         let directory = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -316,6 +340,31 @@ final class ToolServerMCPDiscoveryServiceTests: XCTestCase {
                         "structuredContent": {"count": 1}
                     }
                 }), flush=True)
+        """#
+        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
+        return scriptURL
+    }
+
+    private func makeHangingStdioMCPFixtureScript(markerURL: URL) throws -> URL {
+        let directory = markerURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let scriptURL = directory.appendingPathComponent("hanging_stdio_mcp_fixture.py")
+        let script = #"""
+        import os
+        import pathlib
+        import signal
+        import time
+
+        marker = pathlib.Path(os.environ["NATIVE_STDIO_TERMINATION_MARKER"])
+
+        def handle_sigterm(signum, frame):
+            marker.write_text("terminated")
+            raise SystemExit(0)
+
+        signal.signal(signal.SIGTERM, handle_sigterm)
+
+        while True:
+            time.sleep(1)
         """#
         try script.write(to: scriptURL, atomically: true, encoding: .utf8)
         return scriptURL

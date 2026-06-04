@@ -38,6 +38,24 @@ final class CodeExecutionServiceTests: XCTestCase {
         XCTAssertEqual(run.exitCode, 0)
         XCTAssertEqual(run.stdout.trimmingCharacters(in: .whitespacesAndNewlines), "native python")
         XCTAssertEqual(run.stderr, "")
+        XCTAssertTrue(run.stderr.isEmpty)
+    }
+
+    func testPythonExecutionTruncatesLargeOutputAtCaptureLimit() async throws {
+        let service = CodeExecutionService()
+
+        let run = await service.execute(
+            CodeExecutionRequest(
+                language: .python,
+                code: "print('x' * 200)",
+                timeoutSeconds: 2,
+                maxCapturedOutputBytes: 64
+            )
+        )
+
+        XCTAssertEqual(run.status, .failed)
+        XCTAssertLessThanOrEqual(run.stdout.utf8.count, 64)
+        XCTAssertTrue(run.stderr.contains("Output truncated after reaching the 64-byte capture limit."))
     }
 
     func testExecutionTimeoutTerminatesLongRunningCommand() async throws {

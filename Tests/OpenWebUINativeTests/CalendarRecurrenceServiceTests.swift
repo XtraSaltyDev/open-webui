@@ -33,7 +33,91 @@ final class CalendarRecurrenceServiceTests: XCTestCase {
         )
     }
 
-    func testUnsupportedRuleFallsBackToOriginalEventOnly() {
+    func testYearlyRuleExpandsByMonthOccurrencesInsideRange() {
+        let calendar = Calendar.gregorianUTC(firstWeekday: 2)
+        let service = CalendarRecurrenceService(calendar: calendar)
+        let event = AppCalendarEvent(
+            calendarID: "team",
+            title: "Budget review",
+            startAt: calendar.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 9))!,
+            endAt: calendar.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 10))!,
+            rrule: "FREQ=YEARLY;BYMONTH=1,6"
+        )
+        let rangeStart = calendar.date(from: DateComponents(year: 2026, month: 1, day: 1))!
+        let rangeEnd = calendar.date(from: DateComponents(year: 2026, month: 12, day: 31, hour: 23, minute: 59, second: 59))!
+
+        let occurrences = service.occurrences(of: [event], in: rangeStart...rangeEnd)
+
+        XCTAssertEqual(
+            occurrences.map(\.startAt),
+            [
+                calendar.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 9))!,
+                calendar.date(from: DateComponents(year: 2026, month: 6, day: 1, hour: 9))!
+            ]
+        )
+    }
+
+    func testYearlyRuleOrdersByMonthChronologically() {
+        let calendar = Calendar.gregorianUTC(firstWeekday: 2)
+        let service = CalendarRecurrenceService(calendar: calendar)
+        let event = AppCalendarEvent(
+            calendarID: "team",
+            title: "Annual planning",
+            startAt: calendar.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 9))!,
+            endAt: calendar.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 10))!,
+            rrule: "FREQ=YEARLY;BYMONTH=6,1;COUNT=4"
+        )
+        let rangeStart = calendar.date(from: DateComponents(year: 2026, month: 1, day: 1))!
+        let rangeEnd = calendar.date(from: DateComponents(year: 2027, month: 12, day: 31, hour: 23, minute: 59, second: 59))!
+
+        let occurrences = service.occurrences(of: [event], in: rangeStart...rangeEnd)
+
+        XCTAssertEqual(
+            occurrences.map(\.startAt),
+            [
+                calendar.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 9))!,
+                calendar.date(from: DateComponents(year: 2026, month: 6, day: 1, hour: 9))!,
+                calendar.date(from: DateComponents(year: 2027, month: 1, day: 1, hour: 9))!,
+                calendar.date(from: DateComponents(year: 2027, month: 6, day: 1, hour: 9))!
+            ]
+        )
+        XCTAssertEqual(
+            occurrences.map(\.endAt),
+            [
+                calendar.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 10))!,
+                calendar.date(from: DateComponents(year: 2026, month: 6, day: 1, hour: 10))!,
+                calendar.date(from: DateComponents(year: 2027, month: 1, day: 1, hour: 10))!,
+                calendar.date(from: DateComponents(year: 2027, month: 6, day: 1, hour: 10))!
+            ]
+        )
+    }
+
+    func testYearlyRuleHonorsCountLimitAcrossByMonthOccurrences() {
+        let calendar = Calendar.gregorianUTC(firstWeekday: 2)
+        let service = CalendarRecurrenceService(calendar: calendar)
+        let event = AppCalendarEvent(
+            calendarID: "team",
+            title: "Quarterly review",
+            startAt: calendar.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 9))!,
+            endAt: calendar.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 10))!,
+            rrule: "FREQ=YEARLY;BYMONTH=1,6;COUNT=3"
+        )
+        let rangeStart = calendar.date(from: DateComponents(year: 2026, month: 1, day: 1))!
+        let rangeEnd = calendar.date(from: DateComponents(year: 2027, month: 12, day: 31, hour: 23, minute: 59, second: 59))!
+
+        let occurrences = service.occurrences(of: [event], in: rangeStart...rangeEnd)
+
+        XCTAssertEqual(
+            occurrences.map(\.startAt),
+            [
+                calendar.date(from: DateComponents(year: 2026, month: 1, day: 1, hour: 9))!,
+                calendar.date(from: DateComponents(year: 2026, month: 6, day: 1, hour: 9))!,
+                calendar.date(from: DateComponents(year: 2027, month: 1, day: 1, hour: 9))!
+            ]
+        )
+    }
+
+    func testInvalidByMonthFallsBackToOriginalEventOnly() {
         let calendar = Calendar.gregorianUTC(firstWeekday: 2)
         let service = CalendarRecurrenceService(calendar: calendar)
         let event = AppCalendarEvent(
@@ -41,7 +125,7 @@ final class CalendarRecurrenceServiceTests: XCTestCase {
             title: "Yearly sync",
             startAt: calendar.date(from: DateComponents(year: 2026, month: 6, day: 1, hour: 9))!,
             endAt: calendar.date(from: DateComponents(year: 2026, month: 6, day: 1, hour: 10))!,
-            rrule: "FREQ=YEARLY;BYMONTH=7;COUNT=2"
+            rrule: "FREQ=YEARLY;BYMONTH=13;COUNT=2"
         )
         let rangeStart = calendar.date(from: DateComponents(year: 2026, month: 6, day: 1))!
         let rangeEnd = calendar.date(from: DateComponents(year: 2026, month: 7, day: 3))!

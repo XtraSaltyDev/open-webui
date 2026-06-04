@@ -11,6 +11,7 @@ struct SettingsView: View {
     @State private var webSearchResultCount: Int = 3
     @State private var searxngBaseURL: String = ""
     @State private var braveSearchAPIKey: String = ""
+    @State private var tavilySearchAPIKey: String = ""
     @State private var webSearchDomainFilters: String = ""
     @State private var isWebPageContentLoadingEnabled = false
     @State private var maxWebPageContentCharacters = 4_000
@@ -235,6 +236,15 @@ struct SettingsView: View {
                         .foregroundStyle(.secondary)
                 }
 
+                if webSearchEngine == .tavily {
+                    SecureField("Tavily API key", text: $tavilySearchAPIKey)
+                        .textFieldStyle(.roundedBorder)
+
+                    Text(store.settings.webSearch.tavilyAPIKeySecretID == nil ? "Add a Tavily API key to use this engine." : "Leave blank to keep the stored Tavily API key.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
                 TextField("Domain filters", text: $webSearchDomainFilters)
                     .textFieldStyle(.roundedBorder)
 
@@ -252,15 +262,18 @@ struct SettingsView: View {
                                     resultCount: webSearchResultCount,
                                     searxngBaseURL: searxngBaseURL,
                                     braveAPIKeySecretID: store.settings.webSearch.braveAPIKeySecretID,
+                                    tavilyAPIKeySecretID: store.settings.webSearch.tavilyAPIKeySecretID,
                                     domainFilterList: webSearchDomainFilters
                                         .split(separator: ",")
                                         .map { String($0) },
                                     isPageContentLoadingEnabled: isWebPageContentLoadingEnabled,
                                     maxPageContentCharacters: maxWebPageContentCharacters
                                 ),
-                                braveAPIKey: braveSearchAPIKey
+                                braveAPIKey: braveSearchAPIKey,
+                                tavilyAPIKey: tavilySearchAPIKey
                             )
                             braveSearchAPIKey = ""
+                            tavilySearchAPIKey = ""
                             syncLocalFields()
                         }
                     }
@@ -360,6 +373,7 @@ struct SettingsView: View {
         webSearchResultCount = store.settings.webSearch.resultCount
         searxngBaseURL = store.settings.webSearch.searxngBaseURL
         braveSearchAPIKey = ""
+        tavilySearchAPIKey = ""
         webSearchDomainFilters = store.settings.webSearch.domainFilterList.joined(separator: ", ")
         isWebPageContentLoadingEnabled = store.settings.webSearch.isPageContentLoadingEnabled
         maxWebPageContentCharacters = store.settings.webSearch.maxPageContentCharacters

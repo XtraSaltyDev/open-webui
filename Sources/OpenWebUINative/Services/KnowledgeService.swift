@@ -228,7 +228,8 @@ struct KnowledgeService: Sendable {
         contentType: String,
         text: String,
         embeddingModel: String,
-        provider: any ChatProvider
+        provider: any ChatProvider,
+        sourceKind: KnowledgeDocumentSourceKind? = nil
     ) async throws {
         try await upsertTextDocument(
             collectionID: collectionID,
@@ -237,7 +238,8 @@ struct KnowledgeService: Sendable {
             text: text,
             embeddingModel: embeddingModel,
             provider: provider,
-            requireExistingDocument: false
+            requireExistingDocument: false,
+            sourceKind: sourceKind
         )
     }
 
@@ -247,7 +249,8 @@ struct KnowledgeService: Sendable {
         contentType: String,
         text: String,
         embeddingModel: String,
-        provider: any ChatProvider
+        provider: any ChatProvider,
+        sourceKind: KnowledgeDocumentSourceKind? = nil
     ) async throws {
         try await upsertTextDocument(
             collectionID: collectionID,
@@ -256,7 +259,8 @@ struct KnowledgeService: Sendable {
             text: text,
             embeddingModel: embeddingModel,
             provider: provider,
-            requireExistingDocument: true
+            requireExistingDocument: true,
+            sourceKind: sourceKind
         )
     }
 
@@ -331,7 +335,8 @@ struct KnowledgeService: Sendable {
         text: String,
         embeddingModel: String,
         provider: any ChatProvider,
-        requireExistingDocument: Bool
+        requireExistingDocument: Bool,
+        sourceKind: KnowledgeDocumentSourceKind? = nil
     ) async throws {
         var snapshot = try await storage.load()
         guard let collectionIndex = snapshot.collections.firstIndex(where: { $0.id == collectionID }) else {
@@ -347,10 +352,18 @@ struct KnowledgeService: Sendable {
 
         let indexedAt = now()
         let document: KnowledgeDocument
+        let documentSourceKind = sourceKind ?? KnowledgeDocumentSourceKind.inferred(from: contentType, fileName: fileName)
         if let existingDocumentIndex {
             var existingDocument = snapshot.documents[existingDocumentIndex]
             existingDocument.contentType = contentType
             existingDocument.byteCount = Data(text.utf8).count
+            existingDocument.metadata = KnowledgeDocumentMetadata.inferred(
+                fileName: existingDocument.metadata.importedFileName.isEmpty ? fileName : existingDocument.metadata.importedFileName,
+                contentType: contentType,
+                byteCount: existingDocument.byteCount,
+                lastIndexedAt: indexedAt,
+                sourceKind: documentSourceKind
+            )
             existingDocument.updatedAt = indexedAt
             snapshot.documents[existingDocumentIndex] = existingDocument
             document = existingDocument
@@ -360,6 +373,13 @@ struct KnowledgeService: Sendable {
                 fileName: fileName,
                 contentType: contentType,
                 byteCount: Data(text.utf8).count,
+                metadata: KnowledgeDocumentMetadata.inferred(
+                    fileName: fileName,
+                    contentType: contentType,
+                    byteCount: Data(text.utf8).count,
+                    lastIndexedAt: indexedAt,
+                    sourceKind: documentSourceKind
+                ),
                 createdAt: indexedAt,
                 updatedAt: indexedAt
             )

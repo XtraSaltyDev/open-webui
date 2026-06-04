@@ -12,6 +12,7 @@ struct ToolServerMCPDiscoveryService: ToolServerToolDiscovering, ToolServerToolC
     typealias DataLoader = @Sendable (URLRequest) async throws -> (Data, URLResponse)
 
     private let dataLoader: DataLoader
+    private let stdioTimeoutSeconds: TimeInterval
     private let encoder: JSONEncoder = {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.withoutEscapingSlashes]
@@ -19,10 +20,14 @@ struct ToolServerMCPDiscoveryService: ToolServerToolDiscovering, ToolServerToolC
     }()
     private let decoder = JSONDecoder()
 
-    init(dataLoader: @escaping DataLoader = { request in
+    init(
+        dataLoader: @escaping DataLoader = { request in
         try await ToolServerMCPDiscoveryService.defaultDataLoader(request)
-    }) {
+        },
+        stdioTimeoutSeconds: TimeInterval = 5
+    ) {
         self.dataLoader = dataLoader
+        self.stdioTimeoutSeconds = stdioTimeoutSeconds
     }
 
     func discoverTools(for server: AppToolServer) async -> ToolServerToolDiscoveryResult {
@@ -84,7 +89,7 @@ struct ToolServerMCPDiscoveryService: ToolServerToolDiscovering, ToolServerToolC
 
     private func discoverStdioTools(for server: AppToolServer) -> ToolServerToolDiscoveryResult {
         do {
-            let session = try StdioMCPProcessSession(server: server)
+            let session = try StdioMCPProcessSession(server: server, timeoutSeconds: stdioTimeoutSeconds)
             defer {
                 session.close()
             }
@@ -211,7 +216,7 @@ struct ToolServerMCPDiscoveryService: ToolServerToolDiscovering, ToolServerToolC
 
     private func callStdioTool(_ request: ToolServerToolCallRequest, startedAt: Date) -> AppToolServerRun {
         do {
-            let session = try StdioMCPProcessSession(server: request.server)
+            let session = try StdioMCPProcessSession(server: request.server, timeoutSeconds: stdioTimeoutSeconds)
             defer {
                 session.close()
             }
@@ -396,8 +401,9 @@ private final class StdioMCPProcessSession {
     private let process: Process
     private let input: Pipe
     private let outputReader: StdioLineReader
+    private let timeoutSeconds: TimeInterval
 
-    init(server: AppToolServer) throws {
+    init(server: AppToolServer, timeoutSeconds: TimeInterval) throws {
         guard let command = server.command?.trimmingCharacters(in: .whitespacesAndNewlines),
               !command.isEmpty else {
             throw ToolServerMCPDiscoveryError.server("Missing command.")
@@ -407,6 +413,7 @@ private final class StdioMCPProcessSession {
         input = Pipe()
         let output = Pipe()
         let error = Pipe()
+        self.timeoutSeconds = timeoutSeconds
 
         if command.contains("/") {
             process.executableURL = URL(fileURLWithPath: command)
@@ -438,7 +445,7 @@ private final class StdioMCPProcessSession {
     }
 
     func readMessage() throws -> Data {
-        try outputReader.readLine(timeoutSeconds: 5)
+        try outputReader.readLine(timeoutSeconds: timeoutSeconds)
     }
 
     func close() {
@@ -477,6 +484,8 @@ private final class StdioLineReader {
     }
 
     func readLine(timeoutSeconds: TimeInterval) throws -> Data {
+        let timeout = max(timeoutSeconds, 0.1)
+        let deadline = Date().addingTimeInterval(timeout)
         while true {
             lock.lock()
             if let newlineIndex = buffer.firstIndex(of: 0x0A) {
@@ -485,17 +494,27 @@ private final class StdioLineReader {
                 lock.unlock()
                 return Data(line).trimmingTrailingCarriageReturn()
             }
+            let bufferedCount = buffer.count
             let closed = isClosed
             lock.unlock()
 
             if closed {
-                throw ToolServerMCPDiscoveryError.server("Stdio server closed stdout.")
+                if bufferedCount > 0 {
+                    throw ToolServerMCPDiscoveryError.server("Stdio server closed stdout before sending a complete response.")
+                }
+                throw ToolServerMCPDiscoveryError.server("Stdio server closed stdout before sending a response.")
             }
 
-            let deadline = DispatchTime.now() + timeoutSeconds
-            if semaphore.wait(timeout: deadline) == .timedOut {
+            if Task.isCancelled {
+                throw ToolServerMCPDiscoveryError.server("Stdio request cancelled.")
+            }
+
+            if Date() >= deadline {
                 throw ToolServerMCPDiscoveryError.server("Timed out waiting for stdio response.")
             }
+
+            let waitTime = max(0.01, min(0.1, deadline.timeIntervalSinceNow))
+            _ = semaphore.wait(timeout: .now() + waitTime)
         }
     }
 

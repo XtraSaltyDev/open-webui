@@ -97,6 +97,7 @@ final class AppSettingsTests: XCTestCase {
             resultCount: 5,
             searxngBaseURL: "http://localhost:8888",
             braveAPIKeySecretID: "web-search-brave-key",
+            tavilyAPIKeySecretID: "web-search-tavily-key",
             domainFilterList: ["developer.apple.com", "swift.org"],
             isPageContentLoadingEnabled: true,
             maxPageContentCharacters: 6_000
@@ -109,6 +110,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(decoded.webSearch.resultCount, 5)
         XCTAssertEqual(decoded.webSearch.searxngBaseURL, "http://localhost:8888")
         XCTAssertEqual(decoded.webSearch.braveAPIKeySecretID, "web-search-brave-key")
+        XCTAssertEqual(decoded.webSearch.tavilyAPIKeySecretID, "web-search-tavily-key")
         XCTAssertEqual(decoded.webSearch.domainFilterList, ["developer.apple.com", "swift.org"])
         XCTAssertTrue(decoded.webSearch.isPageContentLoadingEnabled)
         XCTAssertEqual(decoded.webSearch.maxPageContentCharacters, 6_000)
@@ -117,11 +119,12 @@ final class AppSettingsTests: XCTestCase {
     func testDecodingWebSearchSettingsNormalizesAdminControls() throws {
         let data = """
         {
-          "webSearch": {
+            "webSearch": {
             "engine": "searxng",
             "resultCount": 25,
             "searxngBaseURL": " http://localhost:8888 ",
             "braveAPIKeySecretID": " web-search-brave-key ",
+            "tavilyAPIKeySecretID": " web-search-tavily-key ",
             "domainFilterList": [" Developer.Apple.com ", "developer.apple.com", "", "SWIFT.ORG"],
             "isPageContentLoadingEnabled": true,
             "maxPageContentCharacters": 25000
@@ -135,6 +138,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.webSearch.resultCount, 10)
         XCTAssertEqual(settings.webSearch.searxngBaseURL, "http://localhost:8888")
         XCTAssertEqual(settings.webSearch.braveAPIKeySecretID, "web-search-brave-key")
+        XCTAssertEqual(settings.webSearch.tavilyAPIKeySecretID, "web-search-tavily-key")
         XCTAssertEqual(settings.webSearch.domainFilterList, ["developer.apple.com", "swift.org"])
         XCTAssertTrue(settings.webSearch.isPageContentLoadingEnabled)
         XCTAssertEqual(settings.webSearch.maxPageContentCharacters, 12_000)

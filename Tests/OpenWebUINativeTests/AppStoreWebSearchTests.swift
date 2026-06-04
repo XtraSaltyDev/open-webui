@@ -94,6 +94,40 @@ final class AppStoreWebSearchTests: XCTestCase {
         XCTAssertFalse(telemetry.networkSummary.contains("brave-secret"))
     }
 
+    func testWebSearchTelemetryRecordsTavilyHostAndKeychainAuthWithoutSecretValue() async throws {
+        let provider = CapturingWebSearchProvider(chunks: ["answer"])
+        let webSearch = StubWebSearchService(results: [
+            WebSearchResult(
+                title: "Tavily Result",
+                url: URL(string: "https://example.com/tavily")!,
+                snippet: "Tavily web context.",
+                pageContent: "Loaded Tavily web context."
+            )
+        ])
+        let fixture = try WebSearchFixture(provider: provider, webSearchService: webSearch)
+        let store = fixture.makeStore()
+        await store.load()
+        await store.selectModel("fake-model")
+        await store.setFeatureToggle(.webSearch, isEnabled: true)
+        await store.updateWebSearchSettings(WebSearchSettings(
+            engine: .tavily,
+            resultCount: 3,
+            tavilyAPIKeySecretID: "web-search-tavily-key",
+            domainFilterList: [],
+            isPageContentLoadingEnabled: true
+        ))
+        store.isWebSearchEnabledForNextPrompt = true
+
+        await store.send("Find Tavily context")
+
+        let telemetry = try XCTUnwrap(store.recentWebSearchTelemetry)
+        XCTAssertEqual(telemetry.engine, .tavily)
+        XCTAssertEqual(telemetry.contactedHosts, ["api.tavily.com", "example.com"])
+        XCTAssertTrue(telemetry.usedAPIKey)
+        XCTAssertFalse(telemetry.networkSummary.contains("web-search-tavily-key"))
+        XCTAssertFalse(telemetry.networkSummary.contains("tavily-secret"))
+    }
+
     func testWebSearchRecordsSecretlessNetworkAuditHistory() async throws {
         let provider = CapturingWebSearchProvider(chunks: ["answer"])
         let webSearch = StubWebSearchService(results: [
@@ -516,6 +550,35 @@ final class AppStoreWebSearchTests: XCTestCase {
         await reloadedStore.load()
         XCTAssertEqual(reloadedStore.settings.webSearch.engine, .brave)
         XCTAssertEqual(reloadedStore.settings.webSearch.braveAPIKeySecretID, secretID)
+    }
+
+    func testUpdateWebSearchSettingsStoresTavilyAPIKeyInSecretStore() async throws {
+        let fixture = try WebSearchFixture(
+            provider: CapturingWebSearchProvider(chunks: ["answer"]),
+            webSearchService: StubWebSearchService()
+        )
+        let store = fixture.makeStore()
+        await store.load()
+
+        await store.updateWebSearchSettings(
+            WebSearchSettings(
+                engine: .tavily,
+                resultCount: 3,
+                tavilyAPIKeySecretID: nil,
+                domainFilterList: []
+            ),
+            tavilyAPIKey: "  tavily-secret  "
+        )
+
+        let secretID = try XCTUnwrap(store.settings.webSearch.tavilyAPIKeySecretID)
+        XCTAssertEqual(secretID, "web-search-tavily-api-key")
+        let savedSecret = try await fixture.secretStore.readSecret(id: secretID)
+        XCTAssertEqual(savedSecret, "tavily-secret")
+
+        let reloadedStore = fixture.makeStore()
+        await reloadedStore.load()
+        XCTAssertEqual(reloadedStore.settings.webSearch.engine, .tavily)
+        XCTAssertEqual(reloadedStore.settings.webSearch.tavilyAPIKeySecretID, secretID)
     }
 }
 

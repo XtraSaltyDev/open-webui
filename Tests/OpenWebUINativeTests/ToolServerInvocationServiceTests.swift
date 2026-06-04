@@ -140,6 +140,64 @@ final class ToolServerInvocationServiceTests: XCTestCase {
         XCTAssertEqual(run.errorMessage, "fixture failed")
     }
 
+    func testStdioInvocationTimesOutAndTerminatesHangingProcess() async throws {
+        let markerURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("terminated.marker")
+        let scriptURL = try makeHangingStdioInvocationFixtureScript(markerURL: markerURL)
+        let server = AppToolServer(
+            id: "stdio",
+            name: "Hanging Stdio MCP",
+            kind: .stdio,
+            command: "/usr/bin/python3",
+            arguments: [scriptURL.path],
+            environment: ["NATIVE_STDIO_TERMINATION_MARKER": markerURL.path]
+        )
+        let service = ToolServerInvocationService(stdioTimeoutSeconds: 0.2)
+
+        let run = await service.invoke(
+            ToolServerInvocationRequest(server: server, requestBody: #"{"ping":true}"#)
+        )
+
+        XCTAssertEqual(run.status, .failed)
+        XCTAssertNil(run.statusCode)
+        XCTAssertEqual(run.errorMessage, "Timed out after 0.2 seconds.")
+        XCTAssertEqual(try String(contentsOf: markerURL, encoding: .utf8), "terminated")
+    }
+
+    func testStdioInvocationCancelsHangingProcess() async throws {
+        let markerURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            .appendingPathComponent("terminated.marker")
+        let scriptURL = try makeHangingStdioInvocationFixtureScript(markerURL: markerURL)
+        let server = AppToolServer(
+            id: "stdio",
+            name: "Hanging Stdio MCP",
+            kind: .stdio,
+            command: "/usr/bin/python3",
+            arguments: [scriptURL.path],
+            environment: ["NATIVE_STDIO_TERMINATION_MARKER": markerURL.path]
+        )
+        let service = ToolServerInvocationService(stdioTimeoutSeconds: 5)
+        let startedAt = Date()
+
+        let task = Task {
+            await service.invoke(
+                ToolServerInvocationRequest(server: server, requestBody: #"{"ping":true}"#)
+            )
+        }
+
+        try await Task.sleep(nanoseconds: 150_000_000)
+        task.cancel()
+        let run = await task.value
+
+        XCTAssertEqual(run.status, .failed)
+        XCTAssertNil(run.statusCode)
+        XCTAssertEqual(run.errorMessage, "Invocation cancelled.")
+        XCTAssertLessThan(Date().timeIntervalSince(startedAt), 2.0)
+        XCTAssertEqual(try String(contentsOf: markerURL, encoding: .utf8), "terminated")
+    }
+
     private func makeStdioInvocationFixtureScript() throws -> URL {
         try makeFixtureScript(named: "stdio_invocation_fixture.py", body: #"""
         import json
@@ -170,6 +228,31 @@ final class ToolServerInvocationServiceTests: XCTestCase {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         let scriptURL = directory.appendingPathComponent(name)
         try Data(body.utf8).write(to: scriptURL)
+        return scriptURL
+    }
+
+    private func makeHangingStdioInvocationFixtureScript(markerURL: URL) throws -> URL {
+        let directory = markerURL.deletingLastPathComponent()
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let scriptURL = directory.appendingPathComponent("hanging_stdio_invocation_fixture.py")
+        let script = #"""
+        import os
+        import pathlib
+        import signal
+        import time
+
+        marker = pathlib.Path(os.environ["NATIVE_STDIO_TERMINATION_MARKER"])
+
+        def handle_sigterm(signum, frame):
+            marker.write_text("terminated")
+            raise SystemExit(0)
+
+        signal.signal(signal.SIGTERM, handle_sigterm)
+
+        while True:
+            time.sleep(1)
+        """#
+        try Data(script.utf8).write(to: scriptURL)
         return scriptURL
     }
 }

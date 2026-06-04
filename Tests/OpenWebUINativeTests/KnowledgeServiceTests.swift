@@ -59,6 +59,37 @@ final class KnowledgeServiceTests: XCTestCase {
         XCTAssertTrue(results.first?.text.contains("Apples") ?? false)
     }
 
+    func testImportDocumentPopulatesKnowledgeMetadata() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let storage = JSONKnowledgeStorageService(rootURL: rootURL)
+        let service = KnowledgeService(
+            storage: storage,
+            chunker: KnowledgeTextChunker(maxCharacters: 80),
+            now: { Date(timeIntervalSince1970: 300) }
+        )
+        let provider = KeywordEmbeddingProvider()
+        let collection = try await service.createCollection(named: "Research")
+
+        try await service.importTextDocument(
+            collectionID: collection.id,
+            fileName: "research.pdf",
+            contentType: "application/pdf",
+            text: "PDF knowledge about native macOS apps.",
+            embeddingModel: "embedding-model",
+            provider: provider,
+            sourceKind: .pdf
+        )
+
+        let loaded = try await storage.load()
+        let document = try XCTUnwrap(loaded.documents.first)
+        XCTAssertEqual(document.metadata.importedFileName, "research.pdf")
+        XCTAssertEqual(document.metadata.mimeTypeHint, "application/pdf")
+        XCTAssertEqual(document.metadata.byteCount, Data("PDF knowledge about native macOS apps.".utf8).count)
+        XCTAssertEqual(document.metadata.sourceKind, .pdf)
+        XCTAssertEqual(document.metadata.lastIndexedAt, Date(timeIntervalSince1970: 300))
+    }
+
     func testReindexTextDocumentPreservesDocumentIDAndReplacesChunks() async throws {
         let rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -289,6 +320,57 @@ final class KnowledgeServiceTests: XCTestCase {
         XCTAssertEqual(loaded.collections, snapshot.collections)
         XCTAssertEqual(loaded.documents, snapshot.documents)
         XCTAssertEqual(loaded.chunks, snapshot.chunks)
+    }
+
+    func testStorageLoadsLegacyKnowledgeSnapshotWithoutDocumentMetadata() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let storage = JSONKnowledgeStorageService(rootURL: rootURL)
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+
+        let collectionID = UUID(uuidString: "11111111-1111-1111-1111-111111111111")!
+        let documentID = UUID(uuidString: "22222222-2222-2222-2222-222222222222")!
+        let timestamp = "1970-01-01T00:00:50Z"
+        let legacyJSON = """
+        {
+          "collections": [
+            {
+              "id": "\(collectionID.uuidString)",
+              "name": "Docs",
+              "slug": "docs",
+              "allowedUserIDs": [],
+              "allowedGroupIDs": [],
+              "createdAt": "\(timestamp)",
+              "updatedAt": "\(timestamp)"
+            }
+          ],
+          "documents": [
+            {
+              "id": "\(documentID.uuidString)",
+              "collectionID": "\(collectionID.uuidString)",
+              "fileName": "doc.txt",
+              "contentType": "text/plain",
+              "byteCount": 12,
+              "createdAt": "\(timestamp)",
+              "updatedAt": "\(timestamp)"
+            }
+          ],
+          "chunks": []
+        }
+        """
+        let legacyURL = rootURL.appendingPathComponent("knowledge.json")
+        let legacyData = try XCTUnwrap(legacyJSON.data(using: .utf8))
+        try legacyData.write(to: legacyURL)
+
+        let loaded = try await storage.load()
+        let document = try XCTUnwrap(loaded.documents.first)
+
+        XCTAssertEqual(document.fileName, "doc.txt")
+        XCTAssertEqual(document.metadata.importedFileName, "doc.txt")
+        XCTAssertEqual(document.metadata.mimeTypeHint, "text/plain")
+        XCTAssertEqual(document.metadata.sourceKind, .plainText)
+        XCTAssertEqual(document.metadata.byteCount, 12)
+        XCTAssertEqual(document.metadata.lastIndexedAt, Date(timeIntervalSince1970: 50))
     }
 }
 

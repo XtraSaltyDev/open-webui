@@ -66,12 +66,20 @@ struct KnowledgeDocumentDetailView: View {
             }
 
             HStack(spacing: 12) {
-                Text(detail.document.contentType)
-                Text(ByteCountFormatter.string(fromByteCount: Int64(detail.document.byteCount), countStyle: .file))
+                Text(detail.document.metadata.mimeTypeHint)
+                Text(ByteCountFormatter.string(fromByteCount: Int64(detail.document.metadata.byteCount), countStyle: .file))
                 Text("\(detail.chunks.count) chunks")
-                Text(detail.document.updatedAt, style: .relative)
+                Text(detail.document.metadata.lastIndexedAt, style: .relative)
             }
             .font(.caption)
+            .foregroundStyle(.secondary)
+
+            HStack(spacing: 12) {
+                Text("Imported as \(detail.document.metadata.importedFileName)")
+                Text(detail.document.metadata.sourceKind.displayName)
+                Text(detail.document.createdAt, style: .relative)
+            }
+            .font(.caption2)
             .foregroundStyle(.secondary)
         }
     }

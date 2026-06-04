@@ -573,8 +573,7 @@ final class AppStore: ObservableObject {
             return []
         }
         let providerModels = models.filter { $0.provider != .localFunction }
-        let likelyEmbeddingModels = providerModels.filter(Self.isEmbeddingModel)
-        return likelyEmbeddingModels.isEmpty ? providerModels : likelyEmbeddingModels
+        return providerModels.filter { $0.capabilityMetadata.supportsEmbeddings }
     }
 
     var canTranscribeAudio: Bool {
@@ -606,14 +605,14 @@ final class AppStore: ObservableObject {
         guard canTranscribeAudio else {
             return []
         }
-        return models.filter(Self.isAudioTranscriptionModel)
+        return models.filter { $0.capabilityMetadata.supportsAudioTranscription }
     }
 
     var audioSpeechModels: [ProviderModel] {
         guard canSynthesizeSpeech else {
             return []
         }
-        return models.filter(Self.isSpeechSynthesisModel)
+        return models.filter { $0.capabilityMetadata.supportsSpeechSynthesis }
     }
 
     var openAIAccountAccessPolicy: OpenAIAccountAccessPolicy {
@@ -822,18 +821,30 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func updateWebSearchSettings(_ webSearch: WebSearchSettings, braveAPIKey: String = "") async {
+    func updateWebSearchSettings(
+        _ webSearch: WebSearchSettings,
+        braveAPIKey: String = "",
+        tavilyAPIKey: String = ""
+    ) async {
         let trimmedBraveAPIKey = braveAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmedTavilyAPIKey = tavilyAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
         var updatedWebSearch = webSearch
         if !trimmedBraveAPIKey.isEmpty {
             let secretID = webSearch.braveAPIKeySecretID ?? "web-search-brave-api-key"
             updatedWebSearch.braveAPIKeySecretID = secretID
+        }
+        if !trimmedTavilyAPIKey.isEmpty {
+            let secretID = webSearch.tavilyAPIKeySecretID ?? "web-search-tavily-api-key"
+            updatedWebSearch.tavilyAPIKeySecretID = secretID
         }
 
         settings.webSearch = updatedWebSearch
         do {
             if !trimmedBraveAPIKey.isEmpty, let secretID = updatedWebSearch.braveAPIKeySecretID {
                 try await secretStore.saveSecret(trimmedBraveAPIKey, id: secretID)
+            }
+            if !trimmedTavilyAPIKey.isEmpty, let secretID = updatedWebSearch.tavilyAPIKeySecretID {
+                try await secretStore.saveSecret(trimmedTavilyAPIKey, id: secretID)
             }
             try await settingsStore.save(settings)
         } catch {
@@ -861,7 +872,8 @@ final class AppStore: ObservableObject {
                 : allowedRoots,
             allowedExecutableNames: Array(Set(allowedExecutableNames)).sorted(),
             deniedExecutableNames: Array(Set(deniedExecutableNames)).sorted(),
-            maxTimeoutSeconds: min(max(codeExecution.maxTimeoutSeconds, 0.1), 120)
+            maxTimeoutSeconds: min(max(codeExecution.maxTimeoutSeconds, 0.1), 120),
+            maxCapturedOutputBytes: max(codeExecution.maxCapturedOutputBytes, 1)
         )
         codeExecutionTimeoutSeconds = min(codeExecutionTimeoutSeconds, settings.codeExecution.maxTimeoutSeconds)
         do {
@@ -6821,7 +6833,8 @@ final class AppStore: ObservableObject {
                 contentType: document.contentType,
                 text: document.text,
                 embeddingModel: embeddingModel,
-                provider: provider
+                provider: provider,
+                sourceKind: document.sourceKind
             )
             try await refreshKnowledgeState()
         } catch {
@@ -6860,7 +6873,8 @@ final class AppStore: ObservableObject {
                 contentType: "text/markdown",
                 text: note.content,
                 embeddingModel: embeddingModel,
-                provider: provider
+                provider: provider,
+                sourceKind: .nativeNote
             )
             try await refreshKnowledgeState()
         } catch {
@@ -6893,7 +6907,8 @@ final class AppStore: ObservableObject {
                 contentType: document.contentType,
                 text: document.text,
                 embeddingModel: embeddingModel,
-                provider: provider
+                provider: provider,
+                sourceKind: document.sourceKind
             )
             try await refreshKnowledgeState()
         } catch {
@@ -7871,12 +7886,13 @@ final class AppStore: ObservableObject {
         let policyDecision = CodeExecutionPolicy(settings: settings.codeExecution).evaluate(requestedRun)
         let allowedRun: CodeExecutionRequest
         switch policyDecision {
-        case let .allowed(timeoutSeconds, workingDirectoryPath):
+        case let .allowed(timeoutSeconds, workingDirectoryPath, maxCapturedOutputBytes):
             allowedRun = CodeExecutionRequest(
                 language: requestedRun.language,
                 code: requestedRun.code,
                 workingDirectoryPath: workingDirectoryPath,
-                timeoutSeconds: timeoutSeconds
+                timeoutSeconds: timeoutSeconds,
+                maxCapturedOutputBytes: maxCapturedOutputBytes
             )
         case let .blocked(reason):
             codeExecutionError = reason
@@ -8078,12 +8094,13 @@ final class AppStore: ObservableObject {
         let policyDecision = CodeExecutionPolicy(settings: settings.codeExecution).evaluate(requestedRun)
         let allowedRun: CodeExecutionRequest
         switch policyDecision {
-        case let .allowed(timeoutSeconds, workingDirectoryPath):
+        case let .allowed(timeoutSeconds, workingDirectoryPath, maxCapturedOutputBytes):
             allowedRun = CodeExecutionRequest(
                 language: .shell,
                 code: command,
                 workingDirectoryPath: workingDirectoryPath,
-                timeoutSeconds: timeoutSeconds
+                timeoutSeconds: timeoutSeconds,
+                maxCapturedOutputBytes: maxCapturedOutputBytes
             )
         case let .blocked(reason):
             terminalError = reason
@@ -10821,6 +10838,7 @@ final class AppStore: ObservableObject {
 
         let data = try Data(contentsOf: url)
         let contentType = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "text/plain"
+        let sourceKind = knowledgeSourceKind(for: url, contentType: contentType)
         let text: String?
         if UTType(filenameExtension: url.pathExtension) == .pdf || contentType == "application/pdf" {
             text = extractPDFText(from: data)
@@ -10837,8 +10855,25 @@ final class AppStore: ObservableObject {
             contentType: contentType,
             text: text ?? "",
             originalData: data,
-            byteCount: data.count
+            byteCount: data.count,
+            sourceKind: sourceKind
         )
+    }
+
+    private func knowledgeSourceKind(for url: URL, contentType: String) -> KnowledgeDocumentSourceKind {
+        let pathExtension = url.pathExtension.lowercased()
+        let lowercasedContentType = contentType.lowercased()
+
+        if lowercasedContentType == "application/pdf" || pathExtension == "pdf" {
+            return .pdf
+        }
+        if lowercasedContentType == "text/markdown" || ["md", "markdown"].contains(pathExtension) {
+            return .markdown
+        }
+        if lowercasedContentType.hasPrefix("text/") {
+            return .plainText
+        }
+        return .unknown
     }
 
     private func fileUTType(for file: AppFile) -> UTType {
@@ -11377,55 +11412,21 @@ final class AppStore: ObservableObject {
     }
 
     private func updateAudioModelDefaults(from fetchedModels: [ProviderModel]) {
-        let transcriptionModels = fetchedModels.filter(Self.isAudioTranscriptionModel)
+        let transcriptionModels = fetchedModels.filter {
+            $0.capabilityMetadata.supportsAudioTranscription
+        }
         if !transcriptionModels.isEmpty,
            !transcriptionModels.contains(where: { $0.id == audioTranscriptionModelID }) {
             audioTranscriptionModelID = transcriptionModels[0].id
         }
 
-        let speechModels = fetchedModels.filter(Self.isSpeechSynthesisModel)
+        let speechModels = fetchedModels.filter {
+            $0.capabilityMetadata.supportsSpeechSynthesis
+        }
         if !speechModels.isEmpty,
            !speechModels.contains(where: { $0.id == audioSpeechModelID }) {
             audioSpeechModelID = speechModels[0].id
         }
-    }
-
-    private static func isAudioTranscriptionModel(_ model: ProviderModel) -> Bool {
-        let haystack = audioModelSearchText(for: model)
-        return haystack.contains("transcribe")
-            || haystack.contains("transcription")
-            || haystack.contains("whisper")
-            || haystack.contains("stt")
-    }
-
-    private static func isSpeechSynthesisModel(_ model: ProviderModel) -> Bool {
-        let haystack = audioModelSearchText(for: model)
-        return haystack.contains("tts")
-            || haystack.contains("text-to-speech")
-            || haystack.contains("speech")
-            || haystack.contains("voice")
-    }
-
-    private static func isEmbeddingModel(_ model: ProviderModel) -> Bool {
-        let haystack = modelSearchText(for: model)
-        return haystack.contains("embedding")
-            || haystack.contains("embed")
-            || haystack.contains("nomic-embed")
-            || haystack.contains("bge-")
-            || haystack.contains("e5-")
-            || haystack.contains("gte-")
-            || haystack.contains("jina-embeddings")
-            || haystack.contains("sentence-transformer")
-    }
-
-    private static func audioModelSearchText(for model: ProviderModel) -> String {
-        modelSearchText(for: model)
-    }
-
-    private static func modelSearchText(for model: ProviderModel) -> String {
-        [model.id, model.name, model.details]
-            .compactMap { $0?.lowercased() }
-            .joined(separator: " ")
     }
 
     private func sortAuditEvents() {
@@ -12213,7 +12214,7 @@ final class AppStore: ObservableObject {
         do {
             results = try await webSearchService.search(query: prompt, settings: webSearchSettings)
         } catch {
-            let missingBraveKey = (error as? WebSearchServiceError) == .missingBraveAPIKey
+            let missingAPIKey = (error as? WebSearchServiceError)?.isMissingAPIKey ?? false
             let telemetry = WebSearchTelemetry(
                 query: prompt,
                 engine: webSearchSettings.engine,
@@ -12223,8 +12224,8 @@ final class AppStore: ObservableObject {
                 pageContentResultCount: 0,
                 errorMessage: error.localizedDescription,
                 completedAt: Date(),
-                contactedHosts: missingBraveKey ? [] : webSearchNetworkHosts(for: webSearchSettings),
-                usedAPIKey: missingBraveKey ? false : webSearchUsesAPIKey(webSearchSettings)
+                contactedHosts: missingAPIKey ? [] : webSearchNetworkHosts(for: webSearchSettings),
+                usedAPIKey: missingAPIKey ? false : webSearchUsesAPIKey(webSearchSettings)
             )
             recentWebSearchTelemetry = telemetry
             await recordWebSearchAuditEvent(for: telemetry, outcome: .failed)
@@ -12310,6 +12311,8 @@ final class AppStore: ObservableObject {
             return URL(string: settings.searxngBaseURL)?.host
         case .brave:
             return "api.search.brave.com"
+        case .tavily:
+            return "api.tavily.com"
         }
     }
 
@@ -12317,6 +12320,8 @@ final class AppStore: ObservableObject {
         switch settings.engine {
         case .brave:
             return settings.braveAPIKeySecretID?.nilIfEmpty != nil
+        case .tavily:
+            return settings.tavilyAPIKeySecretID?.nilIfEmpty != nil
         case .duckDuckGoHTML, .searxng:
             return false
         }
@@ -12428,6 +12433,7 @@ private struct ImportedTextDocument {
     var text: String
     var originalData: Data
     var byteCount: Int
+    var sourceKind: KnowledgeDocumentSourceKind
 }
 
 private extension String {

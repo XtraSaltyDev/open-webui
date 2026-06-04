@@ -122,6 +122,7 @@ final class AppStoreKnowledgeTests: XCTestCase {
         let snapshot = try await fixture.knowledgeStorage.load()
         XCTAssertEqual(snapshot.documents.first?.fileName, "research.pdf")
         XCTAssertEqual(snapshot.documents.first?.contentType, "application/pdf")
+        XCTAssertEqual(snapshot.documents.first?.metadata.sourceKind, .pdf)
         XCTAssertTrue(snapshot.chunks.contains { $0.text.contains("PDF knowledge about native macOS apps.") })
     }
 
@@ -171,6 +172,9 @@ final class AppStoreKnowledgeTests: XCTestCase {
         XCTAssertEqual(document.fileName, "Launch Research.md")
         XCTAssertEqual(document.contentType, "text/markdown")
         XCTAssertEqual(document.byteCount, Data(note.content.utf8).count)
+        XCTAssertEqual(document.metadata.importedFileName, "Launch Research.md")
+        XCTAssertEqual(document.metadata.mimeTypeHint, "text/markdown")
+        XCTAssertEqual(document.metadata.sourceKind, .nativeNote)
         XCTAssertEqual(store.knowledgeDocuments[collectionID]?.map(\.id), [document.id])
         XCTAssertTrue(snapshot.chunks.contains { chunk in
             chunk.documentID == document.id && chunk.text.contains("Native notes can become searchable knowledge.")

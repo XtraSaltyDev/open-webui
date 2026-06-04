@@ -321,6 +321,24 @@ final class AppStoreProviderSettingsTests: XCTestCase {
         XCTAssertTrue(try XCTUnwrap(rows.first { $0.label == "Speech synthesis" }).isSupported)
     }
 
+    func testProviderModelCapabilityMetadataClassifiesKnownEmbeddingAndMediaFamilies() {
+        let embeddingModel = ProviderModel(id: "text-embedding-3-small", name: "Text Embedding 3 Small", provider: .openAICompatible)
+        let transcriptionModel = ProviderModel(id: "whisper-1", name: "Whisper", provider: .openAICompatible)
+        let speechModel = ProviderModel(id: "gpt-4o-mini-tts", name: "GPT-4o Mini TTS", provider: .openAICompatible)
+
+        XCTAssertEqual(embeddingModel.capabilityMetadata.embeddings, .supported)
+        XCTAssertEqual(transcriptionModel.capabilityMetadata.audioTranscription, .supported)
+        XCTAssertEqual(speechModel.capabilityMetadata.speechSynthesis, .supported)
+    }
+
+    func testProviderModelCapabilityMetadataLeavesUnknownModelFamiliesUnset() {
+        let unknownModel = ProviderModel(id: "gateway-default", name: "Gateway Default", provider: .openAICompatible)
+
+        XCTAssertEqual(unknownModel.capabilityMetadata.embeddings, .unknown)
+        XCTAssertEqual(unknownModel.capabilityMetadata.audioTranscription, .unknown)
+        XCTAssertEqual(unknownModel.capabilityMetadata.speechSynthesis, .unknown)
+    }
+
     func testEmbeddingModelCandidatesPreferLikelyEmbeddingModels() async throws {
         let models = [
             ProviderModel(id: "gpt-4.1", name: "GPT 4.1", provider: .openAICompatible),
@@ -341,7 +359,7 @@ final class AppStoreProviderSettingsTests: XCTestCase {
         XCTAssertEqual(store.selectedEmbeddingModelID, "text-embedding-3-small")
     }
 
-    func testEmbeddingModelCandidatesFallBackWhenProviderModelsAreUnlabeled() async throws {
+    func testEmbeddingModelCandidatesStayEmptyForUnlabeledModelsAndFallBackToChatModel() async throws {
         let models = [
             ProviderModel(id: "custom-vector-model", name: "Custom Vector Model", provider: .openAICompatible),
             ProviderModel(id: "gateway-default", name: "Gateway Default", provider: .openAICompatible)
@@ -352,7 +370,8 @@ final class AppStoreProviderSettingsTests: XCTestCase {
 
         await store.refreshModels()
 
-        XCTAssertEqual(store.embeddingModelCandidates.map(\.id), ["custom-vector-model", "gateway-default"])
+        XCTAssertTrue(store.embeddingModelCandidates.isEmpty)
+        XCTAssertEqual(store.selectedModelID, "custom-vector-model")
         XCTAssertEqual(store.selectedEmbeddingModelID, "custom-vector-model")
     }
 }

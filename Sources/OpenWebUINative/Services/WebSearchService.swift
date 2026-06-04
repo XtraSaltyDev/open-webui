@@ -19,11 +19,21 @@ enum WebSearchTelemetryStatus: String, Equatable, Sendable {
 
 enum WebSearchServiceError: Error, LocalizedError, Equatable {
     case missingBraveAPIKey
+    case missingTavilyAPIKey
 
     var errorDescription: String? {
         switch self {
         case .missingBraveAPIKey:
             return "Add a Brave Search API key before searching with Brave."
+        case .missingTavilyAPIKey:
+            return "Add a Tavily API key before searching with Tavily."
+        }
+    }
+
+    var isMissingAPIKey: Bool {
+        switch self {
+        case .missingBraveAPIKey, .missingTavilyAPIKey:
+            return true
         }
     }
 }
@@ -134,6 +144,8 @@ struct WebSearchService: WebSearching {
             results = try await searchSearXNG(query: trimmedQuery, baseURLString: settings.searxngBaseURL)
         case .brave:
             results = try await searchBrave(query: trimmedQuery, settings: settings)
+        case .tavily:
+            results = try await searchTavily(query: trimmedQuery, settings: settings)
         }
 
         let filteredResults = Array(results
@@ -247,6 +259,47 @@ struct WebSearchService: WebSearching {
                 title: item.title.trimmingCharacters(in: .whitespacesAndNewlines),
                 url: url,
                 snippet: item.description.trimmingCharacters(in: .whitespacesAndNewlines),
+                pageContent: nil
+            )
+        }
+    }
+
+    private func searchTavily(query: String, settings: WebSearchSettings) async throws -> [WebSearchResult] {
+        guard let secretID = settings.tavilyAPIKeySecretID,
+              let apiKey = try await secretStore.readSecret(id: secretID)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !apiKey.isEmpty else {
+            throw WebSearchServiceError.missingTavilyAPIKey
+        }
+
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "api.tavily.com"
+        components.path = "/search"
+        guard let url = components.url else {
+            throw ProviderError.invalidBaseURL("https://api.tavily.com/search")
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONEncoder().encode(TavilySearchRequestBody(
+            query: query,
+            maxResults: max(settings.resultCount, 1)
+        ))
+        let (data, response) = try await dataLoader(request)
+        try Self.validate(response)
+        let payload = try JSONDecoder().decode(TavilySearchResponse.self, from: data)
+        return payload.results.compactMap { item in
+            guard let url = URL(string: item.url) else {
+                return nil
+            }
+            return WebSearchResult(
+                title: item.title.trimmingCharacters(in: .whitespacesAndNewlines),
+                url: url,
+                snippet: (item.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
                 pageContent: nil
             )
         }
@@ -444,4 +497,24 @@ private struct BraveSearchResult: Decodable {
     var title: String
     var url: String
     var description: String
+}
+
+private struct TavilySearchRequestBody: Codable {
+    var query: String
+    var maxResults: Int
+
+    enum CodingKeys: String, CodingKey {
+        case query
+        case maxResults = "max_results"
+    }
+}
+
+private struct TavilySearchResponse: Decodable {
+    var results: [TavilySearchResult]
+}
+
+private struct TavilySearchResult: Decodable {
+    var title: String
+    var url: String
+    var content: String?
 }

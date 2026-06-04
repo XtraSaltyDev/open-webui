@@ -1517,6 +1517,7 @@ enum WebSearchEngine: String, CaseIterable, Codable, Equatable, Sendable {
     case duckDuckGoHTML
     case searxng
     case brave
+    case tavily
 
     var label: String {
         switch self {
@@ -1526,6 +1527,8 @@ enum WebSearchEngine: String, CaseIterable, Codable, Equatable, Sendable {
             return "SearXNG"
         case .brave:
             return "Brave Search"
+        case .tavily:
+            return "Tavily"
         }
     }
 }
@@ -1538,6 +1541,7 @@ struct WebSearchSettings: Codable, Equatable, Sendable {
     var resultCount: Int
     var searxngBaseURL: String
     var braveAPIKeySecretID: String?
+    var tavilyAPIKeySecretID: String?
     var domainFilterList: [String]
     var isPageContentLoadingEnabled: Bool
     var maxPageContentCharacters: Int
@@ -1547,6 +1551,7 @@ struct WebSearchSettings: Codable, Equatable, Sendable {
         resultCount: Int = 3,
         searxngBaseURL: String = "",
         braveAPIKeySecretID: String? = nil,
+        tavilyAPIKeySecretID: String? = nil,
         domainFilterList: [String] = [],
         isPageContentLoadingEnabled: Bool = false,
         maxPageContentCharacters: Int = 4_000
@@ -1556,6 +1561,8 @@ struct WebSearchSettings: Codable, Equatable, Sendable {
         self.searxngBaseURL = searxngBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         let trimmedBraveSecretID = braveAPIKeySecretID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         self.braveAPIKeySecretID = trimmedBraveSecretID.isEmpty ? nil : trimmedBraveSecretID
+        let trimmedTavilySecretID = tavilyAPIKeySecretID?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        self.tavilyAPIKeySecretID = trimmedTavilySecretID.isEmpty ? nil : trimmedTavilySecretID
         self.domainFilterList = Self.normalizedDomainFilters(domainFilterList)
         self.isPageContentLoadingEnabled = isPageContentLoadingEnabled
         self.maxPageContentCharacters = Self.clamped(maxPageContentCharacters, to: Self.pageContentCharacterRange)
@@ -1566,6 +1573,7 @@ struct WebSearchSettings: Codable, Equatable, Sendable {
         case resultCount
         case searxngBaseURL
         case braveAPIKeySecretID
+        case tavilyAPIKeySecretID
         case domainFilterList
         case isPageContentLoadingEnabled
         case maxPageContentCharacters
@@ -1578,6 +1586,7 @@ struct WebSearchSettings: Codable, Equatable, Sendable {
             resultCount: try container.decodeIfPresent(Int.self, forKey: .resultCount) ?? 3,
             searxngBaseURL: try container.decodeIfPresent(String.self, forKey: .searxngBaseURL) ?? "",
             braveAPIKeySecretID: try container.decodeIfPresent(String.self, forKey: .braveAPIKeySecretID),
+            tavilyAPIKeySecretID: try container.decodeIfPresent(String.self, forKey: .tavilyAPIKeySecretID),
             domainFilterList: try container.decodeIfPresent([String].self, forKey: .domainFilterList) ?? [],
             isPageContentLoadingEnabled: try container.decodeIfPresent(Bool.self, forKey: .isPageContentLoadingEnabled) ?? false,
             maxPageContentCharacters: try container.decodeIfPresent(Int.self, forKey: .maxPageContentCharacters) ?? 4_000

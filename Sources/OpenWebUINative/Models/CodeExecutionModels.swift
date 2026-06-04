@@ -36,17 +36,20 @@ struct CodeExecutionRequest: Codable, Equatable, Sendable {
     var code: String
     var workingDirectoryPath: String?
     var timeoutSeconds: Double
+    var maxCapturedOutputBytes: Int?
 
     init(
         language: CodeExecutionLanguage,
         code: String,
         workingDirectoryPath: String? = nil,
-        timeoutSeconds: Double = 10
+        timeoutSeconds: Double = 10,
+        maxCapturedOutputBytes: Int? = nil
     ) {
         self.language = language
         self.code = code
         self.workingDirectoryPath = workingDirectoryPath
         self.timeoutSeconds = timeoutSeconds
+        self.maxCapturedOutputBytes = maxCapturedOutputBytes
     }
 }
 
@@ -56,6 +59,7 @@ struct CodeExecutionSettings: Codable, Equatable, Sendable {
     var allowedExecutableNames: [String]
     var deniedExecutableNames: [String]
     var maxTimeoutSeconds: Double
+    var maxCapturedOutputBytes: Int
 
     enum CodingKeys: String, CodingKey {
         case allowedLanguages
@@ -63,6 +67,7 @@ struct CodeExecutionSettings: Codable, Equatable, Sendable {
         case allowedExecutableNames
         case deniedExecutableNames
         case maxTimeoutSeconds
+        case maxCapturedOutputBytes
     }
 
     init(
@@ -70,13 +75,15 @@ struct CodeExecutionSettings: Codable, Equatable, Sendable {
         allowedWorkingDirectoryRoots: [String] = CodeExecutionSettings.defaultAllowedWorkingDirectoryRoots(),
         allowedExecutableNames: [String] = [],
         deniedExecutableNames: [String] = [],
-        maxTimeoutSeconds: Double = 30
+        maxTimeoutSeconds: Double = 30,
+        maxCapturedOutputBytes: Int = 1_048_576
     ) {
         self.allowedLanguages = allowedLanguages
         self.allowedWorkingDirectoryRoots = allowedWorkingDirectoryRoots
         self.allowedExecutableNames = allowedExecutableNames
         self.deniedExecutableNames = deniedExecutableNames
         self.maxTimeoutSeconds = maxTimeoutSeconds
+        self.maxCapturedOutputBytes = maxCapturedOutputBytes
     }
 
     init(from decoder: Decoder) throws {
@@ -88,6 +95,7 @@ struct CodeExecutionSettings: Codable, Equatable, Sendable {
         allowedExecutableNames = try container.decodeIfPresent([String].self, forKey: .allowedExecutableNames) ?? []
         deniedExecutableNames = try container.decodeIfPresent([String].self, forKey: .deniedExecutableNames) ?? []
         maxTimeoutSeconds = try container.decodeIfPresent(Double.self, forKey: .maxTimeoutSeconds) ?? 30
+        maxCapturedOutputBytes = try container.decodeIfPresent(Int.self, forKey: .maxCapturedOutputBytes) ?? 1_048_576
     }
 
     static func defaultAllowedWorkingDirectoryRoots() -> [String] {
@@ -100,7 +108,7 @@ struct CodeExecutionSettings: Codable, Equatable, Sendable {
 }
 
 enum CodeExecutionPolicyDecision: Equatable, Sendable {
-    case allowed(timeoutSeconds: Double, workingDirectoryPath: String?)
+    case allowed(timeoutSeconds: Double, workingDirectoryPath: String?, maxCapturedOutputBytes: Int)
     case blocked(reason: String)
 }
 
@@ -126,7 +134,12 @@ struct CodeExecutionPolicy: Sendable {
         }
 
         let timeout = min(max(request.timeoutSeconds, 0.1), max(settings.maxTimeoutSeconds, 0.1))
-        return .allowed(timeoutSeconds: timeout, workingDirectoryPath: workingDirectory)
+        let maxCapturedOutputBytes = max(settings.maxCapturedOutputBytes, 1)
+        return .allowed(
+            timeoutSeconds: timeout,
+            workingDirectoryPath: workingDirectory,
+            maxCapturedOutputBytes: maxCapturedOutputBytes
+        )
     }
 
     private func isAllowedWorkingDirectory(_ workingDirectory: String) -> Bool {
