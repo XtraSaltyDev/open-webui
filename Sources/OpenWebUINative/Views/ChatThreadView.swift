@@ -1,7 +1,73 @@
 import SwiftUI
 
+enum ChatTranscriptLayoutPolicy {
+    static let horizontalMargin: CGFloat = 28
+    static let verticalPadding: CGFloat = 20
+    static let rowSpacing: CGFloat = 16
+    static let minimumInterBubbleGap: CGFloat = 64
+    static let minimumViewportWidth: CGFloat = 720
+    static let intrinsicCollapseThreshold: CGFloat = 360
+    static let maximumTranscriptWidth: CGFloat = 920
+    static let maximumAssistantWidth: CGFloat = 720
+    static let maximumUserPillWidth: CGFloat = 560
+
+    static func viewportWidth(for proposedWidth: CGFloat, fallbackWidth: CGFloat?) -> CGFloat {
+        let measuredWidth = max(proposedWidth, fallbackWidth ?? 0)
+        guard measuredWidth < intrinsicCollapseThreshold else {
+            return measuredWidth
+        }
+        return minimumViewportWidth
+    }
+
+    static func transcriptWidth(for viewportWidth: CGFloat) -> CGFloat {
+        max(0, min(maximumTranscriptWidth, viewportWidth - (horizontalMargin * 2)))
+    }
+
+    static func bubbleWidthLimit(for transcriptWidth: CGFloat, role: ChatRole = .assistant) -> CGFloat {
+        let roleLimit = role == .user ? maximumUserPillWidth : maximumAssistantWidth
+        return max(0, min(roleLimit, transcriptWidth))
+    }
+
+    static func oppositeSideSpacerMinLength(for transcriptWidth: CGFloat) -> CGFloat {
+        transcriptWidth > maximumUserPillWidth + minimumInterBubbleGap ? minimumInterBubbleGap : 0
+    }
+}
+
+struct ChatMessageChromeStyle: Equatable {
+    var showsHeader: Bool
+    var showsContainer: Bool
+    var horizontalPadding: CGFloat
+    var verticalPadding: CGFloat
+    var cornerRadius: CGFloat
+    var contentSpacing: CGFloat
+
+    static func style(for role: ChatRole) -> ChatMessageChromeStyle {
+        switch role {
+        case .user:
+            ChatMessageChromeStyle(
+                showsHeader: false,
+                showsContainer: true,
+                horizontalPadding: 14,
+                verticalPadding: 9,
+                cornerRadius: 18,
+                contentSpacing: 6
+            )
+        case .assistant, .system:
+            ChatMessageChromeStyle(
+                showsHeader: true,
+                showsContainer: false,
+                horizontalPadding: 0,
+                verticalPadding: 0,
+                cornerRadius: 0,
+                contentSpacing: 8
+            )
+        }
+    }
+}
+
 struct ChatThreadView: View {
     @ObservedObject var store: AppStore
+    var availableWidth: CGFloat?
 
     private var thread: ChatThread? {
         store.selectedThread
@@ -9,27 +75,46 @@ struct ChatThreadView: View {
 
     var body: some View {
         ScrollViewReader { proxy in
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 14) {
-                    if let thread, !thread.messages.isEmpty {
-                        ForEach(thread.messages) { message in
-                            MessageBubble(
-                                message: message,
-                                store: store,
-                                isFocused: message.id == store.focusedChatMessageID
-                            )
-                                .id(message.id)
+            GeometryReader { geometry in
+                let viewportWidth = ChatTranscriptLayoutPolicy.viewportWidth(
+                    for: geometry.size.width,
+                    fallbackWidth: availableWidth
+                )
+                let transcriptWidth = ChatTranscriptLayoutPolicy.transcriptWidth(for: viewportWidth)
+
+                ScrollView {
+                    HStack(alignment: .top, spacing: 0) {
+                        Spacer(minLength: ChatTranscriptLayoutPolicy.horizontalMargin)
+
+                        LazyVStack(alignment: .center, spacing: ChatTranscriptLayoutPolicy.rowSpacing) {
+                            if let thread, !thread.messages.isEmpty {
+                                ForEach(thread.messages) { message in
+                                    MessageRow(
+                                        message: message,
+                                        store: store,
+                                        isFocused: message.id == store.focusedChatMessageID,
+                                        transcriptWidth: transcriptWidth
+                                    )
+                                    .id(message.id)
+                                }
+                            } else {
+                                ContentUnavailableView(
+                                    "Start a Native Chat",
+                                    systemImage: "bubble.left.and.bubble.right",
+                                    description: Text("Choose a provider model and send a prompt.")
+                                )
+                                .frame(width: transcriptWidth)
+                                .frame(minHeight: 420)
+                            }
                         }
-                    } else {
-                        ContentUnavailableView(
-                            "Start a Native Chat",
-                            systemImage: "bubble.left.and.bubble.right",
-                            description: Text("Choose a provider model and send a prompt.")
-                        )
-                        .frame(maxWidth: .infinity, minHeight: 420)
+                        .frame(width: transcriptWidth, alignment: .top)
+
+                        Spacer(minLength: ChatTranscriptLayoutPolicy.horizontalMargin)
                     }
+                    .padding(.vertical, ChatTranscriptLayoutPolicy.verticalPadding)
+                    .frame(minWidth: viewportWidth, minHeight: geometry.size.height, alignment: .top)
                 }
-                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
             .onChange(of: thread?.messages.last?.content) {
                 if let lastID = thread?.messages.last?.id {
@@ -45,6 +130,7 @@ struct ChatThreadView: View {
                 scrollToFocusedMessage(with: proxy)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private func scrollToFocusedMessage(with proxy: ScrollViewProxy) {
@@ -54,6 +140,32 @@ struct ChatThreadView: View {
         withAnimation {
             proxy.scrollTo(focusedChatMessageID, anchor: .center)
         }
+    }
+}
+
+private struct MessageRow: View {
+    var message: ChatMessage
+    @ObservedObject var store: AppStore
+    var isFocused: Bool
+    var transcriptWidth: CGFloat
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 0) {
+            if message.role == .user {
+                Spacer(minLength: ChatTranscriptLayoutPolicy.oppositeSideSpacerMinLength(for: transcriptWidth))
+            }
+
+            MessageBubble(message: message, store: store, isFocused: isFocused)
+                .frame(
+                    maxWidth: ChatTranscriptLayoutPolicy.bubbleWidthLimit(for: transcriptWidth, role: message.role),
+                    alignment: message.role == .user ? .trailing : .leading
+                )
+
+            if message.role != .user {
+                Spacer(minLength: ChatTranscriptLayoutPolicy.oppositeSideSpacerMinLength(for: transcriptWidth))
+            }
+        }
+        .frame(width: transcriptWidth, alignment: message.role == .user ? .trailing : .leading)
     }
 }
 
@@ -69,225 +181,232 @@ private struct MessageBubble: View {
     @State private var feedbackComment = ""
 
     var body: some View {
-        HStack(alignment: .top) {
-            if message.role == .user {
-                Spacer(minLength: 80)
+        let style = ChatMessageChromeStyle.style(for: message.role)
+        VStack(alignment: message.role == .user ? .trailing : .leading, spacing: 5) {
+            messageContent(style: style)
+            MessageActions(
+                message: message,
+                canRegenerate: store.canChat,
+                actionFunctions: store.activeActionFunctions,
+                canRunFunctions: store.currentUserCanInvokeFunctions,
+                onCopy: {
+                    store.copyMessageToPasteboard(id: message.id)
+                },
+                onCopyLink: {
+                    store.copyMessageLink(message.id)
+                },
+                onEdit: {
+                    editedContent = message.content
+                    isEditing = true
+                },
+                onRegenerate: {
+                    Task {
+                        await store.regenerateResponse(messageID: message.id)
+                    }
+                },
+                onRate: { rating in
+                    Task {
+                        await store.rateMessage(id: message.id, rating: rating)
+                    }
+                },
+                onFeedback: {
+                    feedbackRating = message.rating ?? .positive
+                    feedbackReason = ""
+                    feedbackComment = ""
+                    isShowingFeedback = true
+                },
+                onRunActionFunction: { function in
+                    Task {
+                        await store.runActionFunction(function.id, messageID: message.id)
+                    }
+                },
+                onCancelBranch: {
+                    store.cancelAssistantBranch(messageID: message.id)
+                }
+            )
+        }
+        .contextMenu {
+            Button("Copy") {
+                store.copyMessageToPasteboard(id: message.id)
             }
-
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Text(message.role == .user ? "You" : "Assistant")
-                        .font(.caption.weight(.semibold))
-                    if let modelID = message.modelID {
-                        Text(modelID)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let durationLabel = message.generationMetrics?.durationLabel {
-                        Text(durationLabel)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if message.isStreaming {
-                        ProgressView()
-                            .controlSize(.small)
-                    }
-                    if let rating = message.rating {
-                        Text(rating.label)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+            Button("Copy Message Link") {
+                store.copyMessageLink(message.id)
+            }
+            Button("Edit") {
+                editedContent = message.content
+                isEditing = true
+            }
+            if message.role == .assistant {
+                if message.isStreaming {
+                    Button("Stop This Response") {
+                        store.cancelAssistantBranch(messageID: message.id)
                     }
                 }
-
-                if isEditing {
-                    TextField("Message", text: $editedContent, axis: .vertical)
-                        .textFieldStyle(.roundedBorder)
-                        .lineLimit(2...8)
-                    HStack {
-                        Button("Save") {
+                Button("Regenerate") {
+                    Task {
+                        await store.regenerateResponse(messageID: message.id)
+                    }
+                }
+                .disabled(!store.canChat || message.isStreaming)
+                Button("Rate Positive") {
+                    Task {
+                        await store.rateMessage(id: message.id, rating: .positive)
+                    }
+                }
+                Button("Rate Negative") {
+                    Task {
+                        await store.rateMessage(id: message.id, rating: .negative)
+                    }
+                }
+                Button("Give Feedback") {
+                    feedbackRating = message.rating ?? .positive
+                    feedbackReason = ""
+                    feedbackComment = ""
+                    isShowingFeedback = true
+                }
+                if !store.activeActionFunctions.isEmpty {
+                    Divider()
+                    ForEach(store.activeActionFunctions) { function in
+                        Button(function.name) {
                             Task {
-                                await store.editMessage(id: message.id, content: editedContent)
-                                isEditing = false
+                                await store.runActionFunction(function.id, messageID: message.id)
                             }
                         }
-                        Button("Cancel") {
+                        .disabled(!store.currentUserCanInvokeFunctions || message.isStreaming)
+                    }
+                }
+            }
+        }
+        .sheet(isPresented: $isShowingFeedback) {
+            FeedbackSheet(
+                message: message,
+                rating: $feedbackRating,
+                reason: $feedbackReason,
+                comment: $feedbackComment,
+                onCancel: {
+                    isShowingFeedback = false
+                },
+                onSubmit: {
+                    let rating = feedbackRating
+                    let reason = feedbackReason
+                    let comment = feedbackComment
+                    isShowingFeedback = false
+                    Task {
+                        await store.createFeedback(
+                            messageID: message.id,
+                            rating: rating,
+                            reason: reason,
+                            comment: comment
+                        )
+                    }
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func messageContent(style: ChatMessageChromeStyle) -> some View {
+        VStack(alignment: .leading, spacing: style.contentSpacing) {
+            if style.showsHeader {
+                messageHeader
+            }
+
+            if isEditing {
+                TextField("Message", text: $editedContent, axis: .vertical)
+                    .textFieldStyle(.roundedBorder)
+                    .lineLimit(2...8)
+                HStack {
+                    Button("Save") {
+                        Task {
+                            await store.editMessage(id: message.id, content: editedContent)
                             isEditing = false
                         }
                     }
-                    .font(.caption)
-                } else {
-                    MarkdownMessageView(content: message.content)
-                }
-
-                if !message.attachments.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(message.attachments) { attachment in
-                            MessageAttachmentRow(attachment: attachment)
-                        }
+                    Button("Cancel") {
+                        isEditing = false
                     }
                 }
-
-                if !message.citations.isEmpty {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(message.citations) { citation in
-                            MessageCitationRow(
-                                citation: citation,
-                                onOpenSource: {
-                                    Task {
-                                        await store.openCitationSource(citation)
-                                    }
-                                }
-                            )
-                        }
-                    }
-                }
-
-                if let error = message.error {
-                    Text(error)
-                        .font(.caption)
-                        .foregroundStyle(.red)
-                }
-
-                MessageActions(
-                    message: message,
-                    canRegenerate: store.canChat,
-                    actionFunctions: store.activeActionFunctions,
-                    canRunFunctions: store.currentUserCanInvokeFunctions,
-                    onCopy: {
-                        store.copyMessageToPasteboard(id: message.id)
-                    },
-                    onCopyLink: {
-                        store.copyMessageLink(message.id)
-                    },
-                    onEdit: {
-                        editedContent = message.content
-                        isEditing = true
-                    },
-                    onRegenerate: {
-                        Task {
-                            await store.regenerateResponse(messageID: message.id)
-                        }
-                    },
-                    onRate: { rating in
-                        Task {
-                            await store.rateMessage(id: message.id, rating: rating)
-                        }
-                    },
-                    onFeedback: {
-                        feedbackRating = message.rating ?? .positive
-                        feedbackReason = ""
-                        feedbackComment = ""
-                        isShowingFeedback = true
-                    },
-                    onRunActionFunction: { function in
-                        Task {
-                            await store.runActionFunction(function.id, messageID: message.id)
-                        }
-                    },
-                    onCancelBranch: {
-                        store.cancelAssistantBranch(messageID: message.id)
-                    }
-                )
+                .font(.caption)
+            } else {
+                MarkdownMessageView(content: message.content)
             }
-            .padding(12)
-            .background(bubbleBackground)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay {
-                if isFocused {
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.accentColor, lineWidth: 2)
+
+            if !message.attachments.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(message.attachments) { attachment in
+                        MessageAttachmentRow(attachment: attachment)
+                    }
                 }
             }
-            .frame(maxWidth: 720, alignment: .leading)
-            .contextMenu {
-                Button("Copy") {
-                    store.copyMessageToPasteboard(id: message.id)
-                }
-                Button("Copy Message Link") {
-                    store.copyMessageLink(message.id)
-                }
-                Button("Edit") {
-                    editedContent = message.content
-                    isEditing = true
-                }
-                if message.role == .assistant {
-                    if message.isStreaming {
-                        Button("Stop This Response") {
-                            store.cancelAssistantBranch(messageID: message.id)
-                        }
-                    }
-                    Button("Regenerate") {
-                        Task {
-                            await store.regenerateResponse(messageID: message.id)
-                        }
-                    }
-                    .disabled(!store.canChat || message.isStreaming)
-                    Button("Rate Positive") {
-                        Task {
-                            await store.rateMessage(id: message.id, rating: .positive)
-                        }
-                    }
-                    Button("Rate Negative") {
-                        Task {
-                            await store.rateMessage(id: message.id, rating: .negative)
-                        }
-                    }
-                    Button("Give Feedback") {
-                        feedbackRating = message.rating ?? .positive
-                        feedbackReason = ""
-                        feedbackComment = ""
-                        isShowingFeedback = true
-                    }
-                    if !store.activeActionFunctions.isEmpty {
-                        Divider()
-                        ForEach(store.activeActionFunctions) { function in
-                            Button(function.name) {
+
+            if !message.citations.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(message.citations) { citation in
+                        MessageCitationRow(
+                            citation: citation,
+                            onOpenSource: {
                                 Task {
-                                    await store.runActionFunction(function.id, messageID: message.id)
+                                    await store.openCitationSource(citation)
                                 }
                             }
-                            .disabled(!store.currentUserCanInvokeFunctions || message.isStreaming)
-                        }
+                        )
                     }
                 }
             }
-        .sheet(isPresented: $isShowingFeedback) {
-                FeedbackSheet(
-                    message: message,
-                    rating: $feedbackRating,
-                    reason: $feedbackReason,
-                    comment: $feedbackComment,
-                    onCancel: {
-                        isShowingFeedback = false
-                    },
-                    onSubmit: {
-                        let rating = feedbackRating
-                        let reason = feedbackReason
-                        let comment = feedbackComment
-                        isShowingFeedback = false
-                        Task {
-                            await store.createFeedback(
-                                messageID: message.id,
-                                rating: rating,
-                                reason: reason,
-                                comment: comment
-                            )
-                        }
-                    }
-                )
-            }
 
-            if message.role != .user {
-                Spacer(minLength: 80)
+            if let error = message.error {
+                Text(error)
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+        }
+        .padding(.horizontal, style.horizontalPadding)
+        .padding(.vertical, style.verticalPadding)
+        .background {
+            if style.showsContainer {
+                RoundedRectangle(cornerRadius: style.cornerRadius, style: .continuous)
+                    .fill(messageContainerBackground)
+            }
+        }
+        .overlay {
+            if isFocused {
+                RoundedRectangle(cornerRadius: max(style.cornerRadius, 8), style: .continuous)
+                    .stroke(Color.accentColor, lineWidth: 2)
             }
         }
     }
 
-    private var bubbleBackground: Color {
-        if isFocused {
-            return Color.accentColor.opacity(0.22)
+    private var messageHeader: some View {
+        HStack(spacing: 6) {
+            Text(message.role == .user ? "You" : "Assistant")
+                .font(.caption.weight(.semibold))
+            if let modelID = message.modelID {
+                Text(modelID)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let durationLabel = message.generationMetrics?.durationLabel {
+                Text(durationLabel)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if message.isStreaming {
+                ProgressView()
+                    .controlSize(.small)
+            }
+            if let rating = message.rating {
+                Text(rating.label)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
-        return message.role == .user ? Color.accentColor.opacity(0.14) : Color.secondary.opacity(0.10)
+    }
+
+    private var messageContainerBackground: Color {
+        if isFocused {
+            return Color.accentColor.opacity(0.24)
+        }
+        return Color.secondary.opacity(0.16)
     }
 }
 

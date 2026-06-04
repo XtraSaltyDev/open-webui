@@ -143,4 +143,41 @@ final class MarkdownRenderingTests: XCTestCase {
             CodeSyntaxSegment(text: code, kind: .plain)
         ])
     }
+
+    func testDedicatedRendererBuildsMathAndCodeSnapshots() {
+        let markdown = """
+        Inline $E=mc^2$.
+
+        ```swift
+        let answer = 42
+        ```
+        """
+
+        let snapshots = MarkdownMessageSnapshotRenderer().snapshots(from: markdown)
+
+        XCTAssertEqual(snapshots, [
+            RenderedMessageSnapshot.markdown("Inline"),
+            RenderedMessageSnapshot.math(
+                display: false,
+                source: "E=mc^2",
+                html: #"<span class="math math-inline" data-renderer="katex">E=mc^2</span>"#
+            ),
+            RenderedMessageSnapshot.markdown("."),
+            RenderedMessageSnapshot.code(
+                language: "swift",
+                source: "let answer = 42",
+                tokens: [
+                    RenderedCodeToken(text: "let", scope: "keyword"),
+                    RenderedCodeToken(text: " answer = ", scope: "plain"),
+                    RenderedCodeToken(text: "42", scope: "number")
+                ]
+            )
+        ])
+    }
+
+    func testMathRendererEscapesHTMLInSource() {
+        let html = MathMessageRenderer().html(for: #"x < y && z"#, display: true)
+
+        XCTAssertEqual(html, #"<div class="math math-display" data-renderer="katex">x &lt; y &amp;&amp; z</div>"#)
+    }
 }

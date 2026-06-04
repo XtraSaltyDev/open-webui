@@ -56,42 +56,27 @@ struct AdminDirectoryView: View {
             Label("Groups", systemImage: "person.3")
         }
 
-        HStack {
-            Button {
+        SidebarActionStrip {
+            SidebarActionButton(title: "New User", systemImage: "person.badge.plus", isDisabled: !store.currentUserCanManageAdminDirectory) {
                 editorMode = .createUser
-            } label: {
-                Label("New User", systemImage: "person.badge.plus")
             }
-            .help("New user")
-            .disabled(!store.currentUserCanManageAdminDirectory)
 
-            Button {
+            SidebarActionButton(title: "New Group", systemImage: "person.3.sequence", isDisabled: !store.currentUserCanManageAdminDirectory) {
                 editorMode = .createGroup
-            } label: {
-                Label("New Group", systemImage: "person.3.sequence")
             }
-            .help("New group")
-            .disabled(!store.currentUserCanManageAdminDirectory)
 
-            Button {
+            SidebarActionButton(title: "Import Admin Directory", systemImage: "square.and.arrow.down", isDisabled: !store.currentUserCanManageAdminDirectory) {
                 store.importAdminDirectoryJSONWithOpenPanel()
-            } label: {
-                Label("Import Admin Directory", systemImage: "square.and.arrow.down")
             }
-            .help("Import admin directory")
-            .disabled(!store.currentUserCanManageAdminDirectory)
 
-            Button {
+            SidebarActionButton(
+                title: "Export Admin Directory",
+                systemImage: "square.and.arrow.up",
+                isDisabled: !store.currentUserCanManageAdminDirectory || (store.adminUsers.isEmpty && store.adminGroups.isEmpty)
+            ) {
                 store.exportAdminDirectoryJSONWithSavePanel()
-            } label: {
-                Label("Export Admin Directory", systemImage: "square.and.arrow.up")
             }
-            .help("Export admin directory")
-            .disabled(!store.currentUserCanManageAdminDirectory || (store.adminUsers.isEmpty && store.adminGroups.isEmpty))
         }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.borderless)
-        .font(.caption)
         .sheet(item: $editorMode) { mode in
             switch mode {
             case .createUser, .editUser:

@@ -62,4 +62,46 @@ final class ChatSearchServiceTests: XCTestCase {
         XCTAssertEqual(results.map(\.threadTitle), ["Knowledge"])
         XCTAssertTrue(results.first?.snippet.contains("Citations point back") == true)
     }
+
+    func testSearchIndexesThreadMetadataAttachmentsAndCitationsWithAllQueryTerms() {
+        let threadID = UUID(uuidString: "00000000-0000-0000-0000-00000000C003")!
+        let messageID = UUID(uuidString: "00000000-0000-0000-0000-00000000A003")!
+        let thread = ChatThread(
+            id: threadID,
+            title: "Release Parity",
+            messages: [
+                ChatMessage(
+                    id: messageID,
+                    role: .user,
+                    content: "Please summarize this source.",
+                    createdAt: Date(timeIntervalSince1970: 50),
+                    attachments: [
+                        ChatAttachment(
+                            fileName: "scan.pdf",
+                            contentType: "application/pdf",
+                            byteCount: 42,
+                            textContent: "OCR invoice number XR-42."
+                        )
+                    ],
+                    citations: [
+                        ChatCitation(
+                            collectionName: "Docs",
+                            collectionSlug: "docs",
+                            sourceName: "roadmap.md",
+                            text: "KaTeX rendering is part of release parity.",
+                            score: 0.91
+                        )
+                    ]
+                )
+            ]
+        )
+
+        let attachmentResults = ChatSearchService().search("invoice XR-42", in: [thread])
+        let citationResults = ChatSearchService().search("KaTeX parity", in: [thread])
+
+        XCTAssertEqual(attachmentResults.map(\.messageID), [messageID])
+        XCTAssertEqual(citationResults.map(\.threadID), [threadID])
+        XCTAssertTrue(attachmentResults.first?.snippet.contains("XR-42") == true)
+        XCTAssertTrue(citationResults.first?.snippet.localizedCaseInsensitiveContains("KaTeX rendering") == true)
+    }
 }

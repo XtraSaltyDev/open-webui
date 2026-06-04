@@ -82,7 +82,11 @@ struct ChatExportService {
             do {
                 return try JSONDecoder.openWebUIDecoder.decode([OpenWebUIChatRecord].self, from: data).map(\.thread)
             } catch {
-                return try JSONDecoder.openWebUIDecoder.decode(OpenWebUIChatsEnvelope.self, from: data).chats.map(\.thread)
+                do {
+                    return try JSONDecoder.openWebUIDecoder.decode(OpenWebUIChatsEnvelope.self, from: data).chats.map(\.thread)
+                } catch {
+                    return try JSONDecoder.openWebUIDecoder.decode(OpenWebUIChatsDataEnvelope.self, from: data).data.map(\.thread)
+                }
             }
         }
     }
@@ -181,6 +185,7 @@ private struct OpenWebUIChatExportMessage: Encodable {
     var model: String?
     var timestamp: Int
     var annotation: OpenWebUIChatExportAnnotation?
+    var files: [OpenWebUIChatFileReference]
 
     enum CodingKeys: String, CodingKey {
         case id
@@ -191,6 +196,7 @@ private struct OpenWebUIChatExportMessage: Encodable {
         case model
         case timestamp
         case annotation
+        case files
     }
 
     init(message: ChatMessage, parentID: String?, childrenIDs: [String]) {
@@ -202,6 +208,7 @@ private struct OpenWebUIChatExportMessage: Encodable {
         model = message.modelID
         timestamp = Int(message.createdAt.timeIntervalSince1970)
         annotation = message.rating.map(OpenWebUIChatExportAnnotation.init(rating:))
+        files = message.attachments.map(OpenWebUIChatFileReference.init(attachment:))
     }
 
     func encode(to encoder: Encoder) throws {
@@ -218,6 +225,9 @@ private struct OpenWebUIChatExportMessage: Encodable {
         try container.encodeIfPresent(model, forKey: .model)
         try container.encode(timestamp, forKey: .timestamp)
         try container.encodeIfPresent(annotation, forKey: .annotation)
+        if !files.isEmpty {
+            try container.encode(files, forKey: .files)
+        }
     }
 }
 
@@ -236,6 +246,10 @@ private struct OpenWebUIChatExportAnnotation: Encodable {
 
 private struct OpenWebUIChatsEnvelope: Decodable {
     var chats: [OpenWebUIChatRecord]
+}
+
+private struct OpenWebUIChatsDataEnvelope: Decodable {
+    var data: [OpenWebUIChatRecord]
 }
 
 private struct OpenWebUIChatRecord: Decodable {
@@ -270,7 +284,7 @@ private struct OpenWebUIChatRecord: Decodable {
             : chat.models
         return ChatThread(
             id: id.flatMap(UUID.init(uuidString:)) ?? UUID(),
-            title: title ?? "Imported Chat",
+            title: title ?? chat.title ?? "Imported Chat",
             userID: userID ?? "local-user",
             createdAt: Date(timeIntervalSince1970: createdAt ?? Date().timeIntervalSince1970),
             updatedAt: Date(timeIntervalSince1970: updatedAt ?? createdAt ?? Date().timeIntervalSince1970),
@@ -310,16 +324,19 @@ private struct OpenWebUIChatMeta: Decodable {
 }
 
 private struct OpenWebUIChatBody: Decodable {
+    var title: String?
     var models: [String]
     var history: OpenWebUIChatHistory?
 
     enum CodingKeys: String, CodingKey {
+        case title
         case models
         case history
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
+        title = try container.decodeIfPresent(String.self, forKey: .title)
         models = try container.decodeIfPresent([String].self, forKey: .models) ?? []
         history = try container.decodeIfPresent(OpenWebUIChatHistory.self, forKey: .history)
     }
@@ -339,6 +356,14 @@ private struct OpenWebUIChatHistory: Decodable {
     enum CodingKeys: String, CodingKey {
         case messages
         case currentID = "currentId"
+        case currentIDSnake = "current_id"
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        messages = try container.decodeIfPresent([String: OpenWebUIChatMessage].self, forKey: .messages) ?? [:]
+        currentID = try container.decodeIfPresent(String.self, forKey: .currentID)
+            ?? container.decodeIfPresent(String.self, forKey: .currentIDSnake)
     }
 
     var activeMessages: [OpenWebUIChatMessage] {
@@ -378,26 +403,36 @@ private struct OpenWebUIChatMessage: Decodable {
     var model: String?
     var timestamp: Double?
     var annotation: OpenWebUIMessageAnnotation?
+    var files: [OpenWebUIChatFileReference]
 
     enum CodingKeys: String, CodingKey {
         case id
         case parentID = "parentId"
+        case parentIDSnake = "parent_id"
+        case childrenIDs = "childrenIds"
+        case childrenIDsSnake = "children_ids"
         case role
         case content
         case model
         case timestamp
         case annotation
+        case files
+        case attachments
     }
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         id = try container.decodeIfPresent(String.self, forKey: .id)
         parentID = try container.decodeIfPresent(String.self, forKey: .parentID)
+            ?? container.decodeIfPresent(String.self, forKey: .parentIDSnake)
         role = try container.decodeIfPresent(ChatRole.self, forKey: .role)
         content = try container.decodeIfPresent(JSONValue.self, forKey: .content)
         model = try container.decodeIfPresent(String.self, forKey: .model)
         timestamp = try container.decodeIfPresent(Double.self, forKey: .timestamp)
         annotation = try container.decodeIfPresent(OpenWebUIMessageAnnotation.self, forKey: .annotation)
+        files = try container.decodeIfPresent([OpenWebUIChatFileReference].self, forKey: .files)
+            ?? container.decodeIfPresent([OpenWebUIChatFileReference].self, forKey: .attachments)
+            ?? []
     }
 
     var chatMessage: ChatMessage {
@@ -407,9 +442,106 @@ private struct OpenWebUIChatMessage: Decodable {
             content: content?.messageText ?? "",
             modelID: model,
             createdAt: Date(timeIntervalSince1970: timestamp ?? Date().timeIntervalSince1970),
-            rating: annotation?.messageRating
+            rating: annotation?.messageRating,
+            attachments: files.map(\.chatAttachment)
         )
     }
+}
+
+private struct OpenWebUIChatFileReference: Codable {
+    var id: String?
+    var fileName: String
+    var contentType: String
+    var byteCount: Int
+    var textContent: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case filename
+        case type
+        case contentType
+        case contentTypeSnake = "content_type"
+        case size
+        case meta
+        case data
+        case content
+        case text
+    }
+
+    init(attachment: ChatAttachment) {
+        id = attachment.id.uuidString
+        fileName = attachment.fileName
+        contentType = attachment.contentType
+        byteCount = attachment.byteCount
+        textContent = attachment.textContent
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        let meta = try container.decodeIfPresent(OpenWebUIChatFileMeta.self, forKey: .meta)
+        let data = try container.decodeIfPresent(OpenWebUIChatFileData.self, forKey: .data)
+        id = try container.decodeIfPresent(String.self, forKey: .id)
+        let decodedName = try container.decodeIfPresent(String.self, forKey: .name)
+        let decodedFilename = try container.decodeIfPresent(String.self, forKey: .filename)
+        fileName = meta?.name ?? decodedName ?? decodedFilename ?? "attachment"
+
+        let decodedContentTypeSnake = try container.decodeIfPresent(String.self, forKey: .contentTypeSnake)
+        let decodedContentType = try container.decodeIfPresent(String.self, forKey: .contentType)
+        let decodedType = try container.decodeIfPresent(String.self, forKey: .type)
+        let preferredContentType = meta?.contentType ?? decodedContentTypeSnake ?? decodedContentType ?? decodedType
+        if let preferredContentType, preferredContentType.contains("/") {
+            contentType = preferredContentType
+        } else {
+            contentType = "application/octet-stream"
+        }
+
+        let decodedContent = try container.decodeIfPresent(String.self, forKey: .content)
+        let decodedText = try container.decodeIfPresent(String.self, forKey: .text)
+        textContent = data?.content ?? decodedContent ?? decodedText
+
+        let decodedSize = try container.decodeIfPresent(Int.self, forKey: .size)
+        byteCount = meta?.size ?? decodedSize ?? textContent.map { Data($0.utf8).count } ?? 0
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encodeIfPresent(id, forKey: .id)
+        try container.encode("file", forKey: .type)
+        try container.encode(
+            OpenWebUIChatFileMeta(name: fileName, contentType: contentType, size: byteCount),
+            forKey: .meta
+        )
+        if let textContent {
+            try container.encode(OpenWebUIChatFileData(content: textContent), forKey: .data)
+        }
+    }
+
+    var chatAttachment: ChatAttachment {
+        ChatAttachment(
+            id: id.flatMap(UUID.init(uuidString:)) ?? UUID(),
+            fileName: fileName,
+            contentType: contentType,
+            byteCount: byteCount,
+            textContent: textContent
+        )
+    }
+}
+
+private struct OpenWebUIChatFileMeta: Codable {
+    var name: String?
+    var contentType: String?
+    var size: Int?
+
+    enum CodingKeys: String, CodingKey {
+        case name
+        case contentType = "content_type"
+        case size
+    }
+}
+
+private struct OpenWebUIChatFileData: Codable {
+    var content: String?
 }
 
 private struct OpenWebUIMessageAnnotation: Decodable {

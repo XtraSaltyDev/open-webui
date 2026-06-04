@@ -4,56 +4,38 @@ struct ModelPickerView: View {
     @ObservedObject var store: AppStore
 
     var body: some View {
-        HStack(spacing: 12) {
-            Picker("Provider", selection: Binding(
-                get: { store.settings.activeProviderID },
-                set: { providerID in
-                    Task {
-                        await store.selectProvider(providerID)
-                    }
-                }
-            )) {
-                ForEach(store.settings.providers.filter(\.isEnabled)) { provider in
-                    Text(provider.name).tag(provider.id)
-                }
-            }
-            .frame(maxWidth: 220)
+        ViewThatFits(in: .horizontal) {
+            toolbar(showLabels: true, showStatusText: true)
+            toolbar(showLabels: false, showStatusText: false)
+        }
+        .controlSize(.small)
+    }
 
-            Picker("Model", selection: Binding(
-                get: { store.selectedModelID ?? "" },
-                set: { modelID in
-                    Task {
-                        await store.selectModel(modelID.isEmpty ? nil : modelID)
-                    }
+    private func toolbar(showLabels: Bool, showStatusText: Bool) -> some View {
+        HStack(spacing: 8) {
+            HStack(spacing: 5) {
+                if showLabels {
+                    Text("Provider")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
-            )) {
-                if store.models.isEmpty {
-                    Text("No models").tag("")
-                }
-                ForEach(store.models) { model in
-                    Text(model.name).tag(model.id)
-                }
+                providerPicker
             }
-            .frame(maxWidth: 320)
+            .layoutPriority(2)
 
-            Menu {
-                if store.models.isEmpty {
-                    Text("No models")
-                } else {
-                    ForEach(store.models) { model in
-                        Button {
-                            Task {
-                                await store.setModel(model.id, selected: !store.selectedModelIDs.contains(model.id))
-                            }
-                        } label: {
-                            Label(model.name, systemImage: store.selectedModelIDs.contains(model.id) ? "checkmark.circle.fill" : "circle")
-                        }
-                    }
+            HStack(spacing: 5) {
+                if showLabels {
+                    Text("Model")
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .fixedSize(horizontal: true, vertical: false)
                 }
-            } label: {
-                Label("\(store.selectedModelIDs.count) selected", systemImage: "square.stack.3d.up")
+                modelPicker
             }
-            .disabled(store.models.isEmpty)
+            .layoutPriority(2)
+
+            multiModelMenu
 
             Button {
                 Task {
@@ -62,6 +44,8 @@ struct ModelPickerView: View {
             } label: {
                 Label("Refresh", systemImage: "arrow.clockwise")
             }
+            .labelStyle(.iconOnly)
+            .help("Refresh models")
 
             if store.canManageOllamaModels {
                 Divider()
@@ -69,7 +53,7 @@ struct ModelPickerView: View {
 
                 TextField("Pull model", text: $store.newOllamaModelName)
                     .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 180)
+                    .frame(width: 120)
 
                 Button {
                     Task {
@@ -78,6 +62,8 @@ struct ModelPickerView: View {
                 } label: {
                     Label("Pull", systemImage: "square.and.arrow.down")
                 }
+                .labelStyle(.iconOnly)
+                .help("Pull Ollama model")
                 .disabled(store.isPullingModel || store.newOllamaModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
 
                 Button {
@@ -105,11 +91,115 @@ struct ModelPickerView: View {
                 }
             }
 
-            Spacer()
+            Spacer(minLength: 12)
 
-            Text(store.providerStatus.label)
+            providerStatusView(showText: showStatusText)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private var providerPicker: some View {
+        Picker("Provider", selection: Binding(
+            get: { store.settings.activeProviderID },
+            set: { providerID in
+                Task {
+                    await store.selectProvider(providerID)
+                }
+            }
+        )) {
+            ForEach(store.settings.providers.filter(\.isEnabled)) { provider in
+                Text(provider.name).tag(provider.id)
+            }
+        }
+        .labelsHidden()
+        .frame(width: 118)
+    }
+
+    private var modelPicker: some View {
+        Picker("Model", selection: Binding(
+            get: { store.selectedModelID ?? "" },
+            set: { modelID in
+                Task {
+                    await store.selectModel(modelID.isEmpty ? nil : modelID)
+                }
+            }
+        )) {
+            if store.models.isEmpty {
+                Text("No models").tag("")
+            }
+            ForEach(store.models) { model in
+                Text(model.name).tag(model.id)
+            }
+        }
+        .labelsHidden()
+        .frame(width: 170)
+    }
+
+    private var multiModelMenu: some View {
+        Menu {
+            if store.models.isEmpty {
+                Text("No models")
+            } else {
+                ForEach(store.models) { model in
+                    Button {
+                        Task {
+                            await store.setModel(model.id, selected: !store.selectedModelIDs.contains(model.id))
+                        }
+                    } label: {
+                        Label(model.name, systemImage: store.selectedModelIDs.contains(model.id) ? "checkmark.circle.fill" : "circle")
+                    }
+                }
+            }
+        } label: {
+            Label("\(store.selectedModelIDs.count) selected", systemImage: "square.stack.3d.up")
+        }
+        .labelStyle(.iconOnly)
+        .help("\(store.selectedModelIDs.count) selected model\(store.selectedModelIDs.count == 1 ? "" : "s")")
+        .disabled(store.models.isEmpty)
+    }
+
+    @ViewBuilder
+    private func providerStatusView(showText: Bool) -> some View {
+        if showText {
+            Label(statusSummaryText, systemImage: statusSystemImage)
                 .font(.caption)
                 .foregroundStyle(statusStyle)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(width: 96, alignment: .trailing)
+                .help(store.providerStatus.label)
+        } else {
+            Image(systemName: statusSystemImage)
+                .font(.caption)
+                .foregroundStyle(statusStyle)
+                .frame(width: 18)
+                .help(store.providerStatus.label)
+        }
+    }
+
+    private var statusSummaryText: String {
+        switch store.providerStatus {
+        case .available:
+            return "Connected"
+        case .unavailable:
+            return "Offline"
+        case .checking:
+            return "Checking"
+        case .unknown:
+            return "Unknown"
+        }
+    }
+
+    private var statusSystemImage: String {
+        switch store.providerStatus {
+        case .available:
+            return "checkmark.circle.fill"
+        case .unavailable:
+            return "xmark.circle.fill"
+        case .checking:
+            return "clock"
+        case .unknown:
+            return "questionmark.circle"
         }
     }
 

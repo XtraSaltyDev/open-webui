@@ -107,6 +107,30 @@ final class AppStoreAttachmentTests: XCTestCase {
         XCTAssertEqual(try store.exportOriginalFileData(savedFile.id), originalData)
     }
 
+    func testImportScannedPDFAttachmentUsesOCRFallbackAndBecomesSearchable() async throws {
+        let scannedText = "Scanned launch plan with invoice number XR-42."
+        let extractor = FakeDocumentTextExtractor(textByFileName: ["scan.pdf": scannedText])
+        let fixture = try AttachmentStoreFixture(documentTextExtractor: extractor)
+        let fileURL = fixture.rootURL.appendingPathComponent("scan.pdf")
+        let originalData = Data("%PDF-1.7\n% scanned placeholder".utf8)
+        try originalData.write(to: fileURL)
+        let store = fixture.makeStore()
+        await store.load()
+
+        try await store.importAttachment(from: fileURL)
+
+        let pendingAttachment = try XCTUnwrap(store.pendingAttachments.first)
+        let savedFile = try XCTUnwrap(store.files.first)
+        XCTAssertEqual(pendingAttachment.fileName, "scan.pdf")
+        XCTAssertEqual(pendingAttachment.contentType, "application/pdf")
+        XCTAssertEqual(pendingAttachment.textContent, scannedText)
+        XCTAssertEqual(savedFile.textContent, scannedText)
+        XCTAssertEqual(savedFile.originalData, originalData)
+
+        store.fileSearchText = "XR-42"
+        XCTAssertEqual(store.filteredFiles().map(\.fileName), ["scan.pdf"])
+    }
+
     func testImportFileToLibraryIsBlockedWhenFilesFeatureIsDisabled() async throws {
         let fixture = try AttachmentStoreFixture()
         let fileURL = fixture.rootURL.appendingPathComponent("source-notes.md")
@@ -632,8 +656,13 @@ private struct AttachmentStoreFixture {
     let fileStorage: JSONAppFileStorageService
     let provider: (any ChatProvider)?
     let shareService: FakeAttachmentShareService?
+    let documentTextExtractor: (any DocumentTextExtracting)?
 
-    init(provider: (any ChatProvider)? = nil, shareService: FakeAttachmentShareService? = nil) throws {
+    init(
+        provider: (any ChatProvider)? = nil,
+        shareService: FakeAttachmentShareService? = nil,
+        documentTextExtractor: (any DocumentTextExtracting)? = nil
+    ) throws {
         rootURL = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString, isDirectory: true)
         storage = JSONStorageService(rootURL: rootURL.appendingPathComponent("Chats", isDirectory: true))
@@ -641,6 +670,7 @@ private struct AttachmentStoreFixture {
         fileStorage = JSONAppFileStorageService(rootURL: rootURL.appendingPathComponent("Files", isDirectory: true))
         self.provider = provider
         self.shareService = shareService
+        self.documentTextExtractor = documentTextExtractor
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
     }
 
@@ -652,8 +682,17 @@ private struct AttachmentStoreFixture {
             settingsStore: settingsStore,
             secretStore: InMemorySecretStore(),
             providerOverride: provider,
-            shareService: shareService ?? FakeAttachmentShareService()
+            shareService: shareService ?? FakeAttachmentShareService(),
+            documentTextExtractor: documentTextExtractor ?? DocumentTextExtractionService()
         )
+    }
+}
+
+private struct FakeDocumentTextExtractor: DocumentTextExtracting {
+    var textByFileName: [String: String]
+
+    func extractedText(from data: Data, contentType: String, fileName: String) throws -> String? {
+        textByFileName[fileName]
     }
 }
 

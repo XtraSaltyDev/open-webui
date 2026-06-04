@@ -20,6 +20,98 @@ struct CodeSyntaxSegment: Equatable, Sendable {
     var kind: CodeSyntaxTokenKind
 }
 
+struct RenderedCodeToken: Equatable, Sendable {
+    var text: String
+    var scope: String
+}
+
+enum RenderedMessageSnapshot: Equatable, Sendable {
+    case markdown(String)
+    case math(display: Bool, source: String, html: String)
+    case code(language: String?, source: String, tokens: [RenderedCodeToken])
+}
+
+struct MathMessageRenderer: Sendable {
+    func html(for source: String, display: Bool) -> String {
+        let escapedSource = htmlEscaped(source)
+        if display {
+            return #"<div class="math math-display" data-renderer="katex">\#(escapedSource)</div>"#
+        }
+        return #"<span class="math math-inline" data-renderer="katex">\#(escapedSource)</span>"#
+    }
+
+    private func htmlEscaped(_ text: String) -> String {
+        text.reduce(into: "") { result, character in
+            switch character {
+            case "&":
+                result += "&amp;"
+            case "<":
+                result += "&lt;"
+            case ">":
+                result += "&gt;"
+            case "\"":
+                result += "&quot;"
+            case "'":
+                result += "&#39;"
+            default:
+                result.append(character)
+            }
+        }
+    }
+}
+
+struct CodeMessageRenderer: Sendable {
+    var highlighter = CodeSyntaxHighlighter()
+
+    func tokens(for source: String, language: String?) -> [RenderedCodeToken] {
+        highlighter.segments(for: source, language: language).map { segment in
+            RenderedCodeToken(text: segment.text, scope: scope(for: segment.kind))
+        }
+    }
+
+    private func scope(for kind: CodeSyntaxTokenKind) -> String {
+        switch kind {
+        case .plain:
+            return "plain"
+        case .keyword:
+            return "keyword"
+        case .string:
+            return "string"
+        case .number:
+            return "number"
+        case .comment:
+            return "comment"
+        }
+    }
+}
+
+struct MarkdownMessageSnapshotRenderer: Sendable {
+    var parser = MarkdownMessageParser()
+    var mathRenderer = MathMessageRenderer()
+    var codeRenderer = CodeMessageRenderer()
+
+    func snapshots(from markdown: String) -> [RenderedMessageSnapshot] {
+        parser.segments(from: markdown).map { segment in
+            switch segment {
+            case .markdown(let text):
+                return .markdown(text)
+            case .math(let display, let content):
+                return .math(
+                    display: display,
+                    source: content,
+                    html: mathRenderer.html(for: content, display: display)
+                )
+            case .code(let language, let content):
+                return .code(
+                    language: language,
+                    source: content,
+                    tokens: codeRenderer.tokens(for: content, language: language)
+                )
+            }
+        }
+    }
+}
+
 struct CodeSyntaxHighlighter: Sendable {
     func segments(for code: String, language: String?) -> [CodeSyntaxSegment] {
         guard let language = normalizedLanguage(language),

@@ -13,16 +13,16 @@ struct CalendarSidebarView: View {
         }
         .buttonStyle(.plain)
 
-        HStack {
-            Button {
+        SidebarActionStrip {
+            SidebarActionButton(title: "Import Calendar", systemImage: "square.and.arrow.down", isDisabled: !canManageCalendar) {
                 store.importCalendarJSONWithOpenPanel()
-            } label: {
-                Label("Import Calendar", systemImage: "square.and.arrow.down")
             }
-            .help("Import calendar JSON")
-            .disabled(!canManageCalendar)
 
-            Menu {
+            SidebarActionMenu(
+                title: "Export Calendar",
+                systemImage: "square.and.arrow.up",
+                isDisabled: store.calendars.isEmpty && store.calendarEvents.isEmpty
+            ) {
                 Button("Native JSON") {
                     store.exportCalendarJSONWithSavePanel()
                 }
@@ -30,15 +30,8 @@ struct CalendarSidebarView: View {
                 Button("Open WebUI JSON") {
                     store.exportCalendarOpenWebUIJSONWithSavePanel()
                 }
-            } label: {
-                Label("Export Calendar", systemImage: "square.and.arrow.up")
             }
-            .help("Export calendar JSON")
-            .disabled(store.calendars.isEmpty && store.calendarEvents.isEmpty)
         }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.borderless)
-        .font(.caption)
     }
 }
 

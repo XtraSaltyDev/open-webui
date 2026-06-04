@@ -6,6 +6,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView(store: store)
+                .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 360)
         } detail: {
             if let detail = store.selectedKnowledgeDocumentDetail {
                 KnowledgeDocumentDetailView(detail: detail, focusedChunkID: store.selectedKnowledgeChunkID)
@@ -30,20 +31,25 @@ struct ContentView: View {
             } else if store.isShowingCalendar {
                 CalendarDashboardView(store: store)
             } else {
-                VStack(spacing: 0) {
-                    ModelPickerView(store: store)
-                        .padding(.horizontal)
-                        .padding(.vertical, 10)
+                GeometryReader { geometry in
+                    VStack(spacing: 0) {
+                        ModelPickerView(store: store)
+                            .padding(.horizontal)
+                            .padding(.vertical, 10)
 
-                    Divider()
+                        Divider()
 
-                    ChatThreadView(store: store)
+                        ChatThreadView(store: store, availableWidth: geometry.size.width)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                    Divider()
+                        Divider()
 
-                    ComposerView(store: store)
-                        .padding()
+                        ComposerView(store: store)
+                            .padding()
+                    }
+                    .frame(width: geometry.size.width, height: geometry.size.height)
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .frame(minWidth: 900, minHeight: 620)

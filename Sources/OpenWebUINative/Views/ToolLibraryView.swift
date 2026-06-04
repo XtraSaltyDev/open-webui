@@ -37,24 +37,16 @@ struct ToolLibraryView: View {
                 }
             }
 
-            HStack {
-                Button {
+            SidebarActionStrip {
+                SidebarActionButton(title: "New Tool", systemImage: "hammer", isDisabled: !store.currentUserCanManageTools) {
                     editorMode = .create
-                } label: {
-                    Label("New Tool", systemImage: "hammer")
                 }
-                .help("New tool")
-                .disabled(!store.currentUserCanManageTools)
 
-                Button {
+                SidebarActionButton(title: "Import Tools", systemImage: "square.and.arrow.down", isDisabled: !store.currentUserCanManageTools) {
                     store.importToolsJSONWithOpenPanel()
-                } label: {
-                    Label("Import Tools", systemImage: "square.and.arrow.down")
                 }
-                .help("Import tools")
-                .disabled(!store.currentUserCanManageTools)
 
-                Menu {
+                SidebarActionMenu(title: "Export Tools", systemImage: "square.and.arrow.up", isDisabled: store.tools.isEmpty) {
                     Button("Native JSON") {
                         store.exportToolsJSONWithSavePanel()
                     }
@@ -62,14 +54,8 @@ struct ToolLibraryView: View {
                     Button("Open WebUI JSON") {
                         store.exportToolsOpenWebUIJSONWithSavePanel()
                     }
-                } label: {
-                    Label("Export Tools", systemImage: "square.and.arrow.up")
                 }
-                .help("Export tools")
-                .disabled(store.tools.isEmpty)
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
 
             if !store.toolRuns.isEmpty {
                 Divider()

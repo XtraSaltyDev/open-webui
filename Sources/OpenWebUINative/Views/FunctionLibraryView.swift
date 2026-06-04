@@ -37,24 +37,16 @@ struct FunctionLibraryView: View {
                 }
             }
 
-            HStack {
-                Button {
+            SidebarActionStrip {
+                SidebarActionButton(title: "New Function", systemImage: "function", isDisabled: !store.currentUserCanManageFunctions) {
                     editorMode = .create
-                } label: {
-                    Label("New Function", systemImage: "function")
                 }
-                .help("New function")
-                .disabled(!store.currentUserCanManageFunctions)
 
-                Button {
+                SidebarActionButton(title: "Import Functions", systemImage: "square.and.arrow.down", isDisabled: !store.currentUserCanManageFunctions) {
                     store.importFunctionsJSONWithOpenPanel()
-                } label: {
-                    Label("Import Functions", systemImage: "square.and.arrow.down")
                 }
-                .help("Import functions")
-                .disabled(!store.currentUserCanManageFunctions)
 
-                Menu {
+                SidebarActionMenu(title: "Export Functions", systemImage: "square.and.arrow.up", isDisabled: store.functions.isEmpty) {
                     Button("Native JSON") {
                         store.exportFunctionsJSONWithSavePanel()
                     }
@@ -62,14 +54,8 @@ struct FunctionLibraryView: View {
                     Button("Open WebUI JSON") {
                         store.exportFunctionsOpenWebUIJSONWithSavePanel()
                     }
-                } label: {
-                    Label("Export Functions", systemImage: "square.and.arrow.up")
                 }
-                .help("Export functions")
-                .disabled(store.functions.isEmpty)
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
 
             if !store.functionRuns.isEmpty {
                 Divider()

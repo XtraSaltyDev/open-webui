@@ -41,24 +41,16 @@ struct SkillLibraryView: View {
             }
         }
 
-        HStack {
-            Button {
+        SidebarActionStrip {
+            SidebarActionButton(title: "New Skill", systemImage: "sparkles", isDisabled: !store.currentUserCanManageSkills) {
                 editorMode = .create
-            } label: {
-                Label("New Skill", systemImage: "sparkles")
             }
-            .help("New skill")
-            .disabled(!store.currentUserCanManageSkills)
 
-            Button {
+            SidebarActionButton(title: "Import Skills", systemImage: "square.and.arrow.down", isDisabled: !store.currentUserCanManageSkills) {
                 store.importSkillsJSONWithOpenPanel()
-            } label: {
-                Label("Import Skills", systemImage: "square.and.arrow.down")
             }
-            .help("Import skills")
-            .disabled(!store.currentUserCanManageSkills)
 
-            Menu {
+            SidebarActionMenu(title: "Export Skills", systemImage: "square.and.arrow.up", isDisabled: store.skills.isEmpty) {
                 Button("Native JSON") {
                     store.exportSkillsJSONWithSavePanel()
                 }
@@ -66,14 +58,8 @@ struct SkillLibraryView: View {
                 Button("Open WebUI JSON") {
                     store.exportSkillsOpenWebUIJSONWithSavePanel()
                 }
-            } label: {
-                Label("Export Skills", systemImage: "square.and.arrow.up")
             }
-            .help("Export skills")
-            .disabled(store.skills.isEmpty)
         }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.borderless)
         .sheet(item: $editorMode) { mode in
             SkillEditorSheet(
                 mode: mode,

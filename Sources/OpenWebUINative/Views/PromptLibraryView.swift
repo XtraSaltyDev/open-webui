@@ -37,24 +37,16 @@ struct PromptLibraryView: View {
             }
         }
 
-        HStack {
-            Button {
+        SidebarActionStrip {
+            SidebarActionButton(title: "New Prompt", systemImage: "text.badge.plus", isDisabled: !store.currentUserCanManagePrompts) {
                 editorMode = .create
-            } label: {
-                Label("New Prompt", systemImage: "text.badge.plus")
             }
-            .help("New prompt")
-            .disabled(!store.currentUserCanManagePrompts)
 
-            Button {
+            SidebarActionButton(title: "Import Prompts", systemImage: "square.and.arrow.down", isDisabled: !store.currentUserCanManagePrompts) {
                 store.importPromptsJSONWithOpenPanel()
-            } label: {
-                Label("Import Prompts", systemImage: "square.and.arrow.down")
             }
-            .help("Import prompts")
-            .disabled(!store.currentUserCanManagePrompts)
 
-            Menu {
+            SidebarActionMenu(title: "Export Prompts", systemImage: "square.and.arrow.up", isDisabled: store.prompts.isEmpty) {
                 Button("Native JSON") {
                     store.exportPromptsJSONWithSavePanel()
                 }
@@ -62,14 +54,8 @@ struct PromptLibraryView: View {
                 Button("Open WebUI JSON") {
                     store.exportPromptsOpenWebUIJSONWithSavePanel()
                 }
-            } label: {
-                Label("Export Prompts", systemImage: "square.and.arrow.up")
             }
-            .help("Export prompts")
-            .disabled(store.prompts.isEmpty)
         }
-        .labelStyle(.iconOnly)
-        .buttonStyle(.borderless)
         .sheet(item: $editorMode) { mode in
             PromptEditorSheet(
                 mode: mode,

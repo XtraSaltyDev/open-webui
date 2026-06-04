@@ -242,6 +242,123 @@ final class ChatExportServiceTests: XCTestCase {
         XCTAssertEqual(importedThreads.first?.messages.first?.content, "Envelope import.")
     }
 
+    func testImportJSONDecodesOpenWebUIDataEnvelopeAndSnakeCaseCurrentID() throws {
+        let data = Data(
+            """
+            {
+              "data": [
+                {
+                  "chat": {
+                    "title": "Data Envelope",
+                    "models": ["qwen3:latest"],
+                    "history": {
+                      "current_id": "assistant-1",
+                      "messages": {
+                        "user-1": {
+                          "id": "user-1",
+                          "parent_id": null,
+                          "children_ids": ["assistant-1"],
+                          "role": "user",
+                          "content": "Use the attached scan.",
+                          "timestamp": 1710000200,
+                          "files": [
+                            {
+                              "id": "00000000-0000-0000-0000-00000000f111",
+                              "meta": {
+                                "name": "scan.pdf",
+                                "content_type": "application/pdf",
+                                "size": 42
+                              },
+                              "data": {
+                                "content": "OCR text from scanned PDF."
+                              }
+                            }
+                          ]
+                        },
+                        "assistant-1": {
+                          "id": "assistant-1",
+                          "parent_id": "user-1",
+                          "children_ids": [],
+                          "role": "assistant",
+                          "content": "I can search that text now.",
+                          "model": "qwen3:latest",
+                          "timestamp": 1710000201
+                        }
+                      }
+                    }
+                  },
+                  "created_at": 1710000200,
+                  "updated_at": 1710000201
+                }
+              ]
+            }
+            """.utf8
+        )
+
+        let importedThreads = try ChatExportService().threads(fromJSONData: data)
+        let userMessage = try XCTUnwrap(importedThreads.first?.messages.first)
+        let attachment = try XCTUnwrap(userMessage.attachments.first)
+
+        XCTAssertEqual(importedThreads.count, 1)
+        XCTAssertEqual(importedThreads.first?.title, "Data Envelope")
+        XCTAssertEqual(importedThreads.first?.messages.map(\.content), [
+            "Use the attached scan.",
+            "I can search that text now."
+        ])
+        XCTAssertEqual(attachment.id, UUID(uuidString: "00000000-0000-0000-0000-00000000f111"))
+        XCTAssertEqual(attachment.fileName, "scan.pdf")
+        XCTAssertEqual(attachment.contentType, "application/pdf")
+        XCTAssertEqual(attachment.byteCount, 42)
+        XCTAssertEqual(attachment.textContent, "OCR text from scanned PDF.")
+    }
+
+    func testOpenWebUIJSONExportIncludesAttachmentMetadataForRoundTrip() throws {
+        let messageID = UUID(uuidString: "00000000-0000-0000-0000-000000000555")!
+        let attachmentID = UUID(uuidString: "00000000-0000-0000-0000-000000000666")!
+        let thread = ChatThread(
+            title: "Attachment Export",
+            messages: [
+                ChatMessage(
+                    id: messageID,
+                    role: .user,
+                    content: "Use this file.",
+                    attachments: [
+                        ChatAttachment(
+                            id: attachmentID,
+                            fileName: "brief.md",
+                            contentType: "text/markdown",
+                            byteCount: 19,
+                            textContent: "# Brief\nSource text."
+                        )
+                    ]
+                )
+            ]
+        )
+
+        let data = try ChatExportService().openWebUIJSONData(for: thread)
+        let roundTripped = try ChatExportService().threads(fromJSONData: data)
+        let attachment = try XCTUnwrap(roundTripped.first?.messages.first?.attachments.first)
+        let envelope = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let chats = try XCTUnwrap(envelope["chats"] as? [[String: Any]])
+        let chat = try XCTUnwrap(chats.first?["chat"] as? [String: Any])
+        let history = try XCTUnwrap(chat["history"] as? [String: Any])
+        let messages = try XCTUnwrap(history["messages"] as? [String: [String: Any]])
+        let exportedMessage = try XCTUnwrap(messages[messageID.uuidString])
+        let files = try XCTUnwrap(exportedMessage["files"] as? [[String: Any]])
+        let exportedFile = try XCTUnwrap(files.first)
+
+        XCTAssertEqual(attachment.id, attachmentID)
+        XCTAssertEqual(attachment.fileName, "brief.md")
+        XCTAssertEqual(attachment.contentType, "text/markdown")
+        XCTAssertEqual(attachment.byteCount, 19)
+        XCTAssertEqual(attachment.textContent, "# Brief\nSource text.")
+        XCTAssertEqual(files.count, 1)
+        XCTAssertEqual(exportedFile["id"] as? String, attachmentID.uuidString)
+        XCTAssertEqual((exportedFile["meta"] as? [String: Any])?["name"] as? String, "brief.md")
+        XCTAssertEqual((exportedFile["meta"] as? [String: Any])?["content_type"] as? String, "text/markdown")
+        XCTAssertEqual((exportedFile["data"] as? [String: Any])?["content"] as? String, "# Brief\nSource text.")
+    }
+
     func testMarkdownExportIncludesAttachmentMetadataAndText() throws {
         let thread = ChatThread(
             title: "Attached Research",

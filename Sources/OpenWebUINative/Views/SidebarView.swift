@@ -80,51 +80,29 @@ struct SidebarView: View {
 
             Section("Recent Chats") {
                 if store.threads.contains(where: { !$0.isArchived }) {
-                    HStack {
-                        Button {
+                    SidebarActionStrip {
+                        SidebarActionButton(title: "Archive All Chats", systemImage: "archivebox") {
                             isShowingArchiveAllConfirmation = true
-                        } label: {
-                            Label("Archive All Chats", systemImage: "archivebox")
                         }
-                        .buttonStyle(.borderless)
-                        .help("Archive all chats")
 
-                        Button {
+                        SidebarActionButton(title: "Export All Chats", systemImage: "square.and.arrow.up") {
                             store.exportAllThreadsJSONWithSavePanel()
-                        } label: {
-                            Label("Export All Chats", systemImage: "square.and.arrow.up")
                         }
-                        .buttonStyle(.borderless)
-                        .help("Export all chats JSON")
 
-                        Button {
+                        SidebarActionButton(title: "Delete All Chats", systemImage: "trash") {
                             isShowingDeleteAllConfirmation = true
-                        } label: {
-                            Label("Delete All Chats", systemImage: "trash")
                         }
-                        .buttonStyle(.borderless)
-                        .help("Delete all chats")
                     }
-                    .font(.caption)
                 } else if !store.threads.isEmpty {
-                    HStack {
-                        Button {
+                    SidebarActionStrip {
+                        SidebarActionButton(title: "Export All Chats", systemImage: "square.and.arrow.up") {
                             store.exportAllThreadsJSONWithSavePanel()
-                        } label: {
-                            Label("Export All Chats", systemImage: "square.and.arrow.up")
                         }
-                        .buttonStyle(.borderless)
-                        .help("Export all chats JSON")
 
-                        Button {
+                        SidebarActionButton(title: "Delete All Chats", systemImage: "trash") {
                             isShowingDeleteAllConfirmation = true
-                        } label: {
-                            Label("Delete All Chats", systemImage: "trash")
                         }
-                        .buttonStyle(.borderless)
-                        .help("Delete all chats")
                     }
-                    .font(.caption)
                 }
 
                 ForEach(store.filteredThreads()) { thread in
@@ -137,28 +115,17 @@ struct SidebarView: View {
             if !archivedThreads.isEmpty {
                 Section("Archive") {
                     DisclosureGroup {
-                        HStack {
-                            Button {
+                        SidebarActionStrip {
+                            SidebarActionButton(title: "Unarchive All Chats", systemImage: "tray.and.arrow.up") {
                                 Task {
                                     await store.unarchiveAllArchivedThreads()
                                 }
-                            } label: {
-                                Label("Unarchive All", systemImage: "tray.and.arrow.up")
                             }
-                            .labelStyle(.iconOnly)
-                            .buttonStyle(.borderless)
-                            .help("Unarchive all chats")
 
-                            Button {
+                            SidebarActionButton(title: "Export Archived Chats", systemImage: "square.and.arrow.up") {
                                 store.exportArchivedThreadsJSONWithSavePanel()
-                            } label: {
-                                Label("Export Archived Chats", systemImage: "square.and.arrow.up")
                             }
-                            .labelStyle(.iconOnly)
-                            .buttonStyle(.borderless)
-                            .help("Export archived chats JSON")
                         }
-                        .font(.caption)
 
                         ForEach(archivedThreads) { thread in
                             ChatRow(thread: thread, store: store)
@@ -349,148 +316,13 @@ struct SidebarView: View {
                     }
                 }
             }
+
+            Section {
+                quickActionRows
+            }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
-            VStack(spacing: 8) {
-                if store.isFeatureEnabled(.folders) {
-                    HStack {
-                        TextField("New folder", text: $newFolderName)
-                            .textFieldStyle(.roundedBorder)
-                        Button {
-                            Task {
-                                await store.createFolder(named: newFolderName)
-                                newFolderName = ""
-                            }
-                        } label: {
-                            Label("Add Folder", systemImage: "folder.badge.plus")
-                        }
-                        .labelStyle(.iconOnly)
-                        .disabled(newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    }
-                }
-
-                if store.isFeatureEnabled(.knowledge) {
-                    if let editingKnowledgeCollectionID {
-                        VStack(spacing: 6) {
-                            TextField("Collection name", text: $editingKnowledgeCollectionName)
-                                .textFieldStyle(.roundedBorder)
-
-                            HStack {
-                                TextField("Allowed user IDs", text: $editingKnowledgeCollectionAllowedUserIDs)
-                                    .textFieldStyle(.roundedBorder)
-                                TextField("Allowed group IDs", text: $editingKnowledgeCollectionAllowedGroupIDs)
-                                    .textFieldStyle(.roundedBorder)
-                            }
-
-                            HStack {
-                                Button {
-                                    Task {
-                                        await store.updateKnowledgeCollection(
-                                            editingKnowledgeCollectionID,
-                                            name: editingKnowledgeCollectionName,
-                                            allowedUserIDs: parsedCommaSeparatedValues(editingKnowledgeCollectionAllowedUserIDs),
-                                            allowedGroupIDs: parsedCommaSeparatedValues(editingKnowledgeCollectionAllowedGroupIDs)
-                                        )
-                                        self.editingKnowledgeCollectionID = nil
-                                        editingKnowledgeCollectionName = ""
-                                        editingKnowledgeCollectionAllowedUserIDs = ""
-                                        editingKnowledgeCollectionAllowedGroupIDs = ""
-                                    }
-                                } label: {
-                                    Label("Save Collection", systemImage: "checkmark")
-                                }
-                                .labelStyle(.iconOnly)
-                                .disabled(editingKnowledgeCollectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                                Button {
-                                    self.editingKnowledgeCollectionID = nil
-                                    editingKnowledgeCollectionName = ""
-                                    editingKnowledgeCollectionAllowedUserIDs = ""
-                                    editingKnowledgeCollectionAllowedGroupIDs = ""
-                                } label: {
-                                    Label("Cancel", systemImage: "xmark")
-                                }
-                                .labelStyle(.iconOnly)
-                            }
-                        }
-                    }
-
-                    if let editingKnowledgeDocumentID {
-                        HStack {
-                            TextField("Document name", text: $editingKnowledgeDocumentName)
-                                .textFieldStyle(.roundedBorder)
-                            Button {
-                                Task {
-                                    await store.updateKnowledgeDocument(
-                                        editingKnowledgeDocumentID,
-                                        fileName: editingKnowledgeDocumentName
-                                    )
-                                    self.editingKnowledgeDocumentID = nil
-                                    editingKnowledgeDocumentName = ""
-                                }
-                            } label: {
-                                Label("Save Document", systemImage: "checkmark")
-                            }
-                            .labelStyle(.iconOnly)
-                            .disabled(editingKnowledgeDocumentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                            Button {
-                                self.editingKnowledgeDocumentID = nil
-                                editingKnowledgeDocumentName = ""
-                            } label: {
-                                Label("Cancel", systemImage: "xmark")
-                            }
-                            .labelStyle(.iconOnly)
-                        }
-                    }
-
-                    HStack {
-                        TextField("New knowledge", text: $newKnowledgeName)
-                            .textFieldStyle(.roundedBorder)
-                        Button {
-                            store.importKnowledgeJSONWithOpenPanel()
-                        } label: {
-                            Label("Import Knowledge", systemImage: "square.and.arrow.down")
-                        }
-                        .labelStyle(.iconOnly)
-                        .disabled(!store.currentUserCanManageKnowledge)
-                        .help("Import knowledge JSON")
-                        Button {
-                            store.exportKnowledgeJSONWithSavePanel()
-                        } label: {
-                            Label("Export Knowledge", systemImage: "square.and.arrow.up")
-                        }
-                        .labelStyle(.iconOnly)
-                        .disabled(store.knowledgeCollections.isEmpty)
-                        .help("Export knowledge JSON")
-                        Button {
-                            Task {
-                                await store.createKnowledgeCollection(named: newKnowledgeName)
-                                newKnowledgeName = ""
-                            }
-                        } label: {
-                            Label("Add Knowledge", systemImage: "books.vertical")
-                        }
-                        .labelStyle(.iconOnly)
-                        .disabled(
-                            !store.currentUserCanManageKnowledge ||
-                            newKnowledgeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                        )
-                    }
-                }
-
-                HStack {
-                    Button {
-                        store.createThread()
-                    } label: {
-                        Label("New Chat", systemImage: "plus")
-                    }
-                    .buttonStyle(.borderless)
-
-                    Spacer()
-                }
-            }
-            .padding(10)
-        }
+        .contentMargins(.horizontal, 14, for: .scrollContent)
         .fileImporter(
             isPresented: Binding(
                 get: { pendingKnowledgeFileAction != nil },
@@ -538,6 +370,148 @@ struct SidebarView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("All chats will be permanently deleted.")
+        }
+    }
+
+    @ViewBuilder
+    private var quickActionRows: some View {
+        if store.isFeatureEnabled(.folders) {
+            folderQuickActionRow
+        }
+
+        if store.isFeatureEnabled(.knowledge) {
+            knowledgeQuickActionRows
+        }
+
+        SidebarActionStrip {
+            SidebarActionButton(title: "New Chat", systemImage: "plus") {
+                store.createThread()
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var folderQuickActionRow: some View {
+        HStack(spacing: SidebarActionLayoutPolicy.spacing) {
+            TextField("New folder", text: $newFolderName)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 80, maxWidth: .infinity)
+
+            SidebarActionButton(
+                title: "Add Folder",
+                systemImage: "folder.badge.plus",
+                isDisabled: newFolderName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ) {
+                Task {
+                    await store.createFolder(named: newFolderName)
+                    newFolderName = ""
+                }
+            }
+        }
+        .controlSize(.small)
+    }
+
+    @ViewBuilder
+    private var knowledgeQuickActionRows: some View {
+        if let editingKnowledgeCollectionID {
+            VStack(alignment: .leading, spacing: 6) {
+                TextField("Collection name", text: $editingKnowledgeCollectionName)
+                    .textFieldStyle(.roundedBorder)
+
+                TextField("Allowed user IDs", text: $editingKnowledgeCollectionAllowedUserIDs)
+                    .textFieldStyle(.roundedBorder)
+                TextField("Allowed group IDs", text: $editingKnowledgeCollectionAllowedGroupIDs)
+                    .textFieldStyle(.roundedBorder)
+
+                HStack {
+                    SidebarActionButton(
+                        title: "Save Collection",
+                        systemImage: "checkmark",
+                        isDisabled: editingKnowledgeCollectionName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                    ) {
+                        Task {
+                            await store.updateKnowledgeCollection(
+                                editingKnowledgeCollectionID,
+                                name: editingKnowledgeCollectionName,
+                                allowedUserIDs: parsedCommaSeparatedValues(editingKnowledgeCollectionAllowedUserIDs),
+                                allowedGroupIDs: parsedCommaSeparatedValues(editingKnowledgeCollectionAllowedGroupIDs)
+                            )
+                            self.editingKnowledgeCollectionID = nil
+                            editingKnowledgeCollectionName = ""
+                            editingKnowledgeCollectionAllowedUserIDs = ""
+                            editingKnowledgeCollectionAllowedGroupIDs = ""
+                        }
+                    }
+
+                    SidebarActionButton(title: "Cancel", systemImage: "xmark") {
+                        self.editingKnowledgeCollectionID = nil
+                        editingKnowledgeCollectionName = ""
+                        editingKnowledgeCollectionAllowedUserIDs = ""
+                        editingKnowledgeCollectionAllowedGroupIDs = ""
+                    }
+
+                    Spacer(minLength: 0)
+                }
+            }
+            .controlSize(.small)
+        }
+
+        if let editingKnowledgeDocumentID {
+            HStack(spacing: SidebarActionLayoutPolicy.spacing) {
+                TextField("Document name", text: $editingKnowledgeDocumentName)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(minWidth: 80, maxWidth: .infinity)
+
+                SidebarActionButton(
+                    title: "Save Document",
+                    systemImage: "checkmark",
+                    isDisabled: editingKnowledgeDocumentName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                ) {
+                    Task {
+                        await store.updateKnowledgeDocument(
+                            editingKnowledgeDocumentID,
+                            fileName: editingKnowledgeDocumentName
+                        )
+                        self.editingKnowledgeDocumentID = nil
+                        editingKnowledgeDocumentName = ""
+                    }
+                }
+
+                SidebarActionButton(title: "Cancel", systemImage: "xmark") {
+                    self.editingKnowledgeDocumentID = nil
+                    editingKnowledgeDocumentName = ""
+                }
+            }
+            .controlSize(.small)
+        }
+
+        HStack(spacing: SidebarActionLayoutPolicy.spacing) {
+            TextField("New knowledge", text: $newKnowledgeName)
+                .textFieldStyle(.roundedBorder)
+                .frame(minWidth: 80, maxWidth: .infinity)
+
+            SidebarActionButton(
+                title: "Add Knowledge",
+                systemImage: "books.vertical",
+                isDisabled: !store.currentUserCanManageKnowledge ||
+                    newKnowledgeName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            ) {
+                Task {
+                    await store.createKnowledgeCollection(named: newKnowledgeName)
+                    newKnowledgeName = ""
+                }
+            }
+        }
+        .controlSize(.small)
+
+        SidebarActionStrip {
+            SidebarActionButton(title: "Import Knowledge", systemImage: "square.and.arrow.down", isDisabled: !store.currentUserCanManageKnowledge) {
+                store.importKnowledgeJSONWithOpenPanel()
+            }
+
+            SidebarActionButton(title: "Export Knowledge", systemImage: "square.and.arrow.up", isDisabled: store.knowledgeCollections.isEmpty) {
+                store.exportKnowledgeJSONWithSavePanel()
+            }
         }
     }
 

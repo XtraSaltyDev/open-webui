@@ -66,39 +66,26 @@ struct AutomationLibraryView: View {
         .font(.caption2)
         .foregroundStyle(.secondary)
 
-        HStack {
-            Button {
+        SidebarActionStrip {
+            SidebarActionButton(title: "New Automation", systemImage: "clock.badge.plus", isDisabled: !canManageAutomations) {
                 editorMode = .create(defaultModelID: store.selectedModelID ?? store.models.first?.id ?? "")
-            } label: {
-                Label("New Automation", systemImage: "clock.badge.plus")
             }
-            .buttonStyle(.borderless)
-            .disabled(!canManageAutomations)
 
-            Button {
+            SidebarActionButton(
+                title: "Run Due Automations",
+                systemImage: "clock.arrow.circlepath",
+                isDisabled: !store.canChat || !canManageAutomations || store.automations.isEmpty
+            ) {
                 Task {
                     await store.runDueAutomations()
                 }
-            } label: {
-                Label("Run Due", systemImage: "clock.arrow.circlepath")
             }
-            .buttonStyle(.borderless)
-            .disabled(!store.canChat || !canManageAutomations || store.automations.isEmpty)
-            .help("Run active automations whose next run time has passed")
 
-            Spacer()
-
-            Button {
+            SidebarActionButton(title: "Import Automations", systemImage: "square.and.arrow.down", isDisabled: !canManageAutomations) {
                 store.importAutomationsJSONWithOpenPanel()
-            } label: {
-                Label("Import Automations", systemImage: "square.and.arrow.down")
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
-            .disabled(!canManageAutomations)
-            .help("Import automations JSON")
 
-            Menu {
+            SidebarActionMenu(title: "Export Automations", systemImage: "square.and.arrow.up", isDisabled: store.automations.isEmpty) {
                 Button("Native JSON") {
                     store.exportAutomationsJSONWithSavePanel()
                 }
@@ -106,13 +93,7 @@ struct AutomationLibraryView: View {
                 Button("Open WebUI JSON") {
                     store.exportAutomationsOpenWebUIJSONWithSavePanel()
                 }
-            } label: {
-                Label("Export Automations", systemImage: "square.and.arrow.up")
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
-            .disabled(store.automations.isEmpty)
-            .help("Export automations JSON")
         }
         .sheet(item: $editorMode) { mode in
             AutomationEditorSheet(

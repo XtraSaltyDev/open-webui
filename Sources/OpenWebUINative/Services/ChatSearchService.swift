@@ -16,11 +16,13 @@ struct ChatSearchService: Sendable {
         guard !normalizedQuery.isEmpty else {
             return []
         }
+        let terms = searchTerms(in: normalizedQuery)
 
         return threads
             .flatMap { thread in
                 thread.messages.compactMap { message in
-                    guard message.content.range(of: normalizedQuery, options: [.caseInsensitive, .diacriticInsensitive]) != nil else {
+                    let document = indexedDocument(for: message, in: thread)
+                    guard terms.allSatisfy({ document.indexText.localizedStandardContains($0) }) else {
                         return nil
                     }
                     return ChatSearchResult(
@@ -28,7 +30,7 @@ struct ChatSearchService: Sendable {
                         messageID: message.id,
                         threadTitle: thread.title,
                         role: message.role,
-                        snippet: snippet(for: message.content, query: normalizedQuery),
+                        snippet: snippet(for: document.snippetText, query: normalizedQuery, terms: terms),
                         createdAt: message.createdAt
                     )
                 }
@@ -41,10 +43,60 @@ struct ChatSearchService: Sendable {
             }
     }
 
-    private func snippet(for content: String, query: String) -> String {
+    private func searchTerms(in query: String) -> [String] {
+        query
+            .split(whereSeparator: \.isWhitespace)
+            .map(String.init)
+            .filter { !$0.isEmpty }
+    }
+
+    private func indexedDocument(for message: ChatMessage, in thread: ChatThread) -> ChatSearchDocument {
+        let attachmentText = message.attachments
+            .map { attachment in
+                [
+                    attachment.fileName,
+                    attachment.contentType,
+                    attachment.textContent ?? ""
+                ].joined(separator: " ")
+            }
+            .joined(separator: "\n")
+        let citationText = message.citations
+            .map { citation in
+                [
+                    citation.collectionName,
+                    citation.collectionSlug,
+                    citation.sourceName,
+                    citation.text
+                ].joined(separator: " ")
+            }
+            .joined(separator: "\n")
+        let indexText = [
+            thread.title,
+            thread.tags.joined(separator: " "),
+            message.role.rawValue,
+            message.modelID ?? "",
+            message.content,
+            attachmentText,
+            citationText
+        ]
+        .joined(separator: "\n")
+        let snippetText = [
+            message.content,
+            attachmentText,
+            citationText
+        ]
+        .joined(separator: "\n")
+        return ChatSearchDocument(indexText: indexText, snippetText: snippetText)
+    }
+
+    private func snippet(for content: String, query: String, terms: [String]) -> String {
         let trimmedContent = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let matchRange = trimmedContent.range(of: query, options: [.caseInsensitive, .diacriticInsensitive])
+            ?? terms.lazy.compactMap { term in
+                trimmedContent.range(of: term, options: [.caseInsensitive, .diacriticInsensitive])
+            }.first
         guard trimmedContent.count > 120,
-              let matchRange = trimmedContent.range(of: query, options: [.caseInsensitive, .diacriticInsensitive]) else {
+              let matchRange else {
             return trimmedContent
         }
 
@@ -69,4 +121,9 @@ struct ChatSearchService: Sendable {
         }
         return snippet
     }
+}
+
+private struct ChatSearchDocument {
+    var indexText: String
+    var snippetText: String
 }

@@ -51,28 +51,16 @@ struct NoteLibraryView: View {
             }
         }
 
-        HStack {
-            Button {
+        SidebarActionStrip {
+            SidebarActionButton(title: "New Note", systemImage: "note.text.badge.plus", isDisabled: !store.currentUserCanManageNotes) {
                 editorMode = .create
-            } label: {
-                Label("New Note", systemImage: "note.text.badge.plus")
             }
-            .buttonStyle(.borderless)
-            .disabled(!store.currentUserCanManageNotes)
 
-            Spacer()
-
-            Button {
+            SidebarActionButton(title: "Import Notes", systemImage: "square.and.arrow.down", isDisabled: !store.currentUserCanManageNotes) {
                 store.importNotesJSONWithOpenPanel()
-            } label: {
-                Label("Import Notes", systemImage: "square.and.arrow.down")
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
-            .disabled(!store.currentUserCanManageNotes)
-            .help("Import notes JSON")
 
-            Menu {
+            SidebarActionMenu(title: "Export Notes", systemImage: "square.and.arrow.up", isDisabled: store.notes.isEmpty) {
                 Button("Native JSON") {
                     store.exportNotesJSONWithSavePanel()
                 }
@@ -80,13 +68,7 @@ struct NoteLibraryView: View {
                 Button("Open WebUI JSON") {
                     store.exportNotesOpenWebUIJSONWithSavePanel()
                 }
-            } label: {
-                Label("Export Notes", systemImage: "square.and.arrow.up")
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
-            .disabled(store.notes.isEmpty)
-            .help("Export notes JSON")
         }
         .sheet(item: $editorMode) { mode in
             NoteEditorSheet(

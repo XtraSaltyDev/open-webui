@@ -44,28 +44,16 @@ struct ChannelLibraryView: View {
             }
         }
 
-        HStack {
-            Button {
+        SidebarActionStrip {
+            SidebarActionButton(title: "New Channel", systemImage: "number", isDisabled: !canManageChannels) {
                 editorMode = .create
-            } label: {
-                Label("New Channel", systemImage: "number")
             }
-            .buttonStyle(.borderless)
-            .disabled(!canManageChannels)
 
-            Spacer()
-
-            Button {
+            SidebarActionButton(title: "Import Channels", systemImage: "square.and.arrow.down", isDisabled: !canManageChannels) {
                 store.importChannelsJSONWithOpenPanel()
-            } label: {
-                Label("Import Channels", systemImage: "square.and.arrow.down")
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
-            .disabled(!canManageChannels)
-            .help("Import channels JSON")
 
-            Menu {
+            SidebarActionMenu(title: "Export Channels", systemImage: "square.and.arrow.up", isDisabled: store.channels.isEmpty) {
                 Button("Native JSON") {
                     store.exportChannelsJSONWithSavePanel()
                 }
@@ -73,13 +61,7 @@ struct ChannelLibraryView: View {
                 Button("Open WebUI JSON") {
                     store.exportChannelsOpenWebUIJSONWithSavePanel()
                 }
-            } label: {
-                Label("Export Channels", systemImage: "square.and.arrow.up")
             }
-            .labelStyle(.iconOnly)
-            .buttonStyle(.borderless)
-            .disabled(store.channels.isEmpty)
-            .help("Export channels JSON")
         }
         .sheet(item: $editorMode) { mode in
             ChannelEditorSheet(

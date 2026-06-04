@@ -220,6 +220,7 @@ final class AppStore: ObservableObject {
     private let exportService: ChatExportService
     private let shareService: any ChatSharing
     private let chatSearchService = ChatSearchService()
+    private let documentTextExtractor: any DocumentTextExtracting
     private let knowledgeService: KnowledgeService
     private let fileExportService: FileExportService
     private let promptExportService: PromptExportService
@@ -274,6 +275,7 @@ final class AppStore: ObservableObject {
         providerOverride: (any ChatProvider)? = nil,
         exportService: ChatExportService = ChatExportService(),
         shareService: (any ChatSharing)? = nil,
+        documentTextExtractor: any DocumentTextExtracting = DocumentTextExtractionService(),
         knowledgeService: KnowledgeService = KnowledgeService(),
         fileExportService: FileExportService = FileExportService(),
         promptExportService: PromptExportService = PromptExportService(),
@@ -360,6 +362,7 @@ final class AppStore: ObservableObject {
         self.providerOverride = providerOverride
         self.exportService = exportService
         self.shareService = shareService ?? ChatShareService()
+        self.documentTextExtractor = documentTextExtractor
         self.knowledgeService = knowledgeService
         self.fileExportService = fileExportService
         self.promptExportService = promptExportService
@@ -10839,12 +10842,11 @@ final class AppStore: ObservableObject {
         let data = try Data(contentsOf: url)
         let contentType = UTType(filenameExtension: url.pathExtension)?.preferredMIMEType ?? "text/plain"
         let sourceKind = knowledgeSourceKind(for: url, contentType: contentType)
-        let text: String?
-        if UTType(filenameExtension: url.pathExtension) == .pdf || contentType == "application/pdf" {
-            text = extractPDFText(from: data)
-        } else {
-            text = String(data: data, encoding: .utf8)
-        }
+        let text = try documentTextExtractor.extractedText(
+            from: data,
+            contentType: contentType,
+            fileName: url.lastPathComponent
+        )
 
         if requiresExtractedText, text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty != false {
             throw ProviderError.unsupportedAttachment(url.lastPathComponent)
@@ -10888,18 +10890,6 @@ final class AppStore: ObservableObject {
             .appendingPathComponent(file.id.uuidString, isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         return directory.appendingPathComponent(file.fileName)
-    }
-
-    private func extractPDFText(from data: Data) -> String? {
-        guard let document = PDFDocument(data: data) else {
-            return nil
-        }
-
-        let pageText = (0..<document.pageCount).compactMap { pageIndex in
-            document.page(at: pageIndex)?.string
-        }
-        let text = pageText.joined(separator: "\n")
-        return text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : text
     }
 
     private func updateProvider(_ provider: ProviderConfiguration) {
