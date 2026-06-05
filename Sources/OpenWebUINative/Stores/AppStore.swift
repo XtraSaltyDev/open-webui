@@ -201,6 +201,11 @@ final class AppStore: ObservableObject {
     @Published var modelPullStatus: String?
     @Published var isPullingModel: Bool = false
     @Published var isDeletingModel: Bool = false
+    @Published private(set) var modelRefreshSource: ModelRefreshSource = .notLoaded
+    @Published private(set) var modelRefreshState: ModelRefreshState = .notLoaded
+    @Published private(set) var lastModelRefreshTimestamp: Date?
+    @Published private(set) var lastModelRefreshError: String?
+    @Published private(set) var modelRefreshCount: Int = 0
     @Published var isSending: Bool = false
     @Published var isCancellingSend: Bool = false
     @Published var errorMessage: String?
@@ -483,6 +488,14 @@ final class AppStore: ObservableObject {
         }
     }
 
+    var modelRefreshSourceLabel: String {
+        modelRefreshSource.label
+    }
+
+    var modelRefreshStateLabel: String {
+        modelRefreshState.label
+    }
+
     var activeProvider: ProviderConfiguration {
         settings.activeProvider
     }
@@ -681,7 +694,12 @@ final class AppStore: ObservableObject {
             recentErrorSummary: recoveryNotice ?? errorMessage,
             ollamaRuntimeStatus: ollamaRuntimeStatus,
             ollamaOwnsRunningCLIProcess: ollamaOwnsRunningCLIProcess,
-            latestOllamaChatTestErrorSummary: latestOllamaChatTestErrorSummary
+            latestOllamaChatTestErrorSummary: latestOllamaChatTestErrorSummary,
+            modelRefreshSource: modelRefreshSource,
+            modelRefreshState: modelRefreshState,
+            lastModelRefreshTimestamp: lastModelRefreshTimestamp,
+            lastModelRefreshError: lastModelRefreshError,
+            modelRefreshCount: modelRefreshCount
         )
     }
 
@@ -1249,13 +1267,14 @@ final class AppStore: ObservableObject {
 
     func refreshModels() async {
         providerStatus = .checking
+        modelRefreshCount += 1
+        let refreshTimestamp = Date()
+        var refreshSource = modelRefreshSource(for: activeProvider.kind)
         do {
             let provider = try makeActiveProvider()
-            let fetchedModels = try await provider.listModels()
+            refreshSource = modelRefreshSource(for: provider.configuration.kind)
+            let fetchedModels = deduplicatedModelsByProviderAndID(try await provider.listModels())
             models = await modelsIncludingActivePipeFunctions(fetchedModels)
-            guard !models.isEmpty else {
-                throw ProviderError.noModelsReturned(provider.configuration.name)
-            }
             updateAudioModelDefaults(from: fetchedModels)
             let availableIDs = Set(models.map(\.id))
             let previousSelectedModelID = settings.selectedModelID
@@ -1264,6 +1283,9 @@ final class AppStore: ObservableObject {
             settings.selectedModelIDs = settings.selectedModelIDs.filter { availableIDs.contains($0) }
             if let selectedModelID = settings.selectedModelID, !availableIDs.contains(selectedModelID) {
                 settings.selectedModelID = settings.selectedModelIDs.first
+            }
+            if settings.selectedModelID == nil, let selectedModelID = settings.selectedModelIDs.first {
+                settings.selectedModelID = selectedModelID
             }
             let embeddingCandidateIDs = Set(embeddingModelCandidates.map(\.id))
             if let embeddingModelID = settings.embeddingModelID,
@@ -1284,17 +1306,46 @@ final class AppStore: ObservableObject {
                     appendRecoveryNotice(
                         "Recovered provider defaults: \(previousSelectedModelID) is no longer available, so \(selectedModelID) is selected."
                     )
+                } else if let previousSelectedModelID,
+                          !availableIDs.contains(previousSelectedModelID) {
+                    appendRecoveryNotice(
+                        "Recovered provider defaults: \(previousSelectedModelID) is no longer available, so no model is selected."
+                    )
                 }
                 try await settingsStore.save(settings)
             }
-            providerStatus = .available("\(provider.configuration.name) connected (\(models.count) models)")
+            modelRefreshSource = refreshSource
+            modelRefreshState = fetchedModels.isEmpty ? .empty : .live
+            lastModelRefreshTimestamp = refreshTimestamp
+            lastModelRefreshError = nil
+            providerStatus = .available(providerModelRefreshStatus(providerName: provider.configuration.name, liveModelCount: fetchedModels.count))
         } catch {
             models = await modelsIncludingActivePipeFunctions([])
-            if activeProvider.kind == .ollama,
-               newOllamaModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                newOllamaModelName = "gemma3"
+            let availableIDs = Set(models.map(\.id))
+            let previousSelectedModelID = settings.selectedModelID
+            let previousSelectedModelIDs = settings.selectedModelIDs
+            let previousEmbeddingModelID = settings.embeddingModelID
+            settings.selectedModelIDs = settings.selectedModelIDs.filter { availableIDs.contains($0) }
+            if let selectedModelID = settings.selectedModelID, !availableIDs.contains(selectedModelID) {
+                settings.selectedModelID = settings.selectedModelIDs.first
             }
-            providerStatus = .unavailable(providerErrorMessage(for: error))
+            if settings.selectedModelID == nil, let selectedModelID = settings.selectedModelIDs.first {
+                settings.selectedModelID = selectedModelID
+            }
+            if let embeddingModelID = settings.embeddingModelID, !availableIDs.contains(embeddingModelID) {
+                settings.embeddingModelID = nil
+            }
+            if previousSelectedModelID != settings.selectedModelID
+                || previousSelectedModelIDs != settings.selectedModelIDs
+                || previousEmbeddingModelID != settings.embeddingModelID {
+                try? await settingsStore.save(settings)
+            }
+            let message = providerErrorMessage(for: error)
+            modelRefreshSource = refreshSource
+            modelRefreshState = .failed
+            lastModelRefreshTimestamp = refreshTimestamp
+            lastModelRefreshError = message
+            providerStatus = .unavailable(message)
         }
     }
 
@@ -6039,10 +6090,10 @@ final class AppStore: ObservableObject {
                 }
                 guard threadMatchesSearchOperators(thread, query: query) else {
                     return false
-                }
-                return thread.isArchived
             }
-            .sorted { $0.updatedAt > $1.updatedAt }
+            return thread.isArchived
+        }
+            .sorted(by: threadNewestFirstPrecedes)
         guard !query.text.isEmpty else {
             return archived
         }
@@ -6208,17 +6259,17 @@ final class AppStore: ObservableObject {
     func exportArchivedThreadsJSONData() throws -> Data {
         let archivedThreads = threads
             .filter(\.isArchived)
-            .sorted { $0.updatedAt > $1.updatedAt }
+            .sorted(by: threadNewestFirstPrecedes)
         return try JSONEncoder.openWebUIEncoder.encode(archivedThreads)
     }
 
     func exportAllThreadsJSONData() throws -> Data {
-        let allThreads = threads.sorted { $0.updatedAt > $1.updatedAt }
+        let allThreads = threads.sorted(by: threadNewestFirstPrecedes)
         return try JSONEncoder.openWebUIEncoder.encode(allThreads)
     }
 
     func exportAllThreadsOpenWebUIJSONData() throws -> Data {
-        let allThreads = threads.sorted { $0.updatedAt > $1.updatedAt }
+        let allThreads = threads.sorted(by: threadNewestFirstPrecedes)
         return try exportService.openWebUIJSONData(for: allThreads)
     }
 
@@ -6622,7 +6673,7 @@ final class AppStore: ObservableObject {
             sortThreads()
             selectedThreadID = importedThreads
                 .filter { !$0.isArchived }
-                .sorted { $0.updatedAt > $1.updatedAt }
+                .sorted(by: threadNewestFirstPrecedes)
                 .first?.id ?? firstVisibleThreadID()
         } catch {
             errorMessage = error.localizedDescription
@@ -6713,7 +6764,6 @@ final class AppStore: ObservableObject {
                 case .tokenUsage(let tokenUsage):
                     threads[currentThreadIndex].messages[currentMessageIndex].tokenUsage = tokenUsage
                 }
-                threads[currentThreadIndex].updatedAt = Date()
             }
 
             finishAssistantMessage(id: messageID, error: nil)
@@ -10190,7 +10240,6 @@ final class AppStore: ObservableObject {
                     case .tokenUsage(let tokenUsage):
                         threads[threadIndex].messages[messageIndex].tokenUsage = tokenUsage
                     }
-                    threads[threadIndex].updatedAt = Date()
                 }
             }
 
@@ -10386,7 +10435,6 @@ final class AppStore: ObservableObject {
             return
         }
         threads[threadIndex].messages[messageIndex].content += content
-        threads[threadIndex].updatedAt = Date()
     }
 
     private func applyActiveFilterFunctions(
@@ -11899,8 +11947,44 @@ final class AppStore: ObservableObject {
                 pipeModels.append(singlePipeModel(for: function))
             }
         }
-        let pipeIDs = Set(pipeModels.map(\.id))
-        return providerModels.filter { !pipeIDs.contains($0.id) } + pipeModels
+        let deduplicatedPipeModels = deduplicatedModelsByProviderAndID(pipeModels)
+        let pipeIDs = Set(deduplicatedPipeModels.map(\.id))
+        let activeProviderModels = deduplicatedModelsByProviderAndID(providerModels)
+            .filter { !pipeIDs.contains($0.id) }
+        return deduplicatedModelsByID(activeProviderModels + deduplicatedPipeModels)
+    }
+
+    private func deduplicatedModelsByProviderAndID(_ models: [ProviderModel]) -> [ProviderModel] {
+        var seenKeys: Set<String> = []
+        return models.filter { model in
+            let providerID = model.providerID?.uuidString ?? "none"
+            return seenKeys.insert("\(model.provider.rawValue)|\(providerID)|\(model.id)").inserted
+        }
+    }
+
+    private func deduplicatedModelsByID(_ models: [ProviderModel]) -> [ProviderModel] {
+        var seenIDs: Set<String> = []
+        return models.filter { model in
+            seenIDs.insert(model.id).inserted
+        }
+    }
+
+    private func modelRefreshSource(for providerKind: ProviderKind) -> ModelRefreshSource {
+        switch providerKind {
+        case .ollama:
+            return .liveOllama
+        case .openAICompatible:
+            return .openAICompatible
+        case .localFunction:
+            return .localFunction
+        }
+    }
+
+    private func providerModelRefreshStatus(providerName: String, liveModelCount: Int) -> String {
+        if liveModelCount == 0 {
+            return "\(providerName) connected (0 live models)"
+        }
+        return "\(providerName) connected (\(models.count) models)"
     }
 
     private func singlePipeModel(for function: AppFunction) -> ProviderModel {
@@ -12388,13 +12472,25 @@ final class AppStore: ObservableObject {
     }
 
     private func sortThreads() {
-        threads.sort { lhs, rhs in
-            if lhs.isPinned != rhs.isPinned {
-                return lhs.isPinned && !rhs.isPinned
-            }
+        threads.sort(by: threadSortPrecedes)
+        refreshChatTranscriptSearchResults()
+    }
+
+    private func threadSortPrecedes(_ lhs: ChatThread, _ rhs: ChatThread) -> Bool {
+        if lhs.isPinned != rhs.isPinned {
+            return lhs.isPinned && !rhs.isPinned
+        }
+        return threadNewestFirstPrecedes(lhs, rhs)
+    }
+
+    private func threadNewestFirstPrecedes(_ lhs: ChatThread, _ rhs: ChatThread) -> Bool {
+        if lhs.updatedAt != rhs.updatedAt {
             return lhs.updatedAt > rhs.updatedAt
         }
-        refreshChatTranscriptSearchResults()
+        if lhs.createdAt != rhs.createdAt {
+            return lhs.createdAt > rhs.createdAt
+        }
+        return lhs.id.uuidString < rhs.id.uuidString
     }
 
     @discardableResult

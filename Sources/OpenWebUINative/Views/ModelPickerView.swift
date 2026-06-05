@@ -64,7 +64,7 @@ struct ModelPickerView: View {
                 Divider()
                     .frame(height: 20)
 
-                TextField("Pull model", text: $store.newOllamaModelName)
+                TextField("Pull model, e.g. llama3.2", text: $store.newOllamaModelName)
                     .textFieldStyle(.roundedBorder)
                     .frame(width: 120)
 

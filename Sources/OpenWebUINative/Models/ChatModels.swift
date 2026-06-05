@@ -111,6 +111,46 @@ struct ProviderModel: Identifiable, Codable, Equatable, Sendable {
     var details: String?
 }
 
+enum ModelRefreshSource: Equatable, Sendable {
+    case notLoaded
+    case liveOllama
+    case openAICompatible
+    case localFunction
+
+    var label: String {
+        switch self {
+        case .notLoaded:
+            return "Not loaded"
+        case .liveOllama:
+            return "Live Ollama /api/tags"
+        case .openAICompatible:
+            return "OpenAI-compatible /models"
+        case .localFunction:
+            return "Local pipe functions"
+        }
+    }
+}
+
+enum ModelRefreshState: Equatable, Sendable {
+    case notLoaded
+    case live
+    case empty
+    case failed
+
+    var label: String {
+        switch self {
+        case .notLoaded:
+            return "Not loaded"
+        case .live:
+            return "Live"
+        case .empty:
+            return "Empty"
+        case .failed:
+            return "Failed"
+        }
+    }
+}
+
 struct ChatFolder: Identifiable, Codable, Equatable, Sendable {
     var id: UUID
     var name: String

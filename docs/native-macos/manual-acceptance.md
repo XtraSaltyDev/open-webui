@@ -29,6 +29,26 @@ git diff --check
 - [ ] Select multiple models and confirm the UI clearly shows the selected count.
 - [ ] Confirm Ollama pull/delete actions only appear for providers that support native model management.
 
+## Ollama Model List
+
+- [ ] Start Ollama.
+- [ ] Confirm `curl http://localhost:11434/api/tags` returns the expected installed models.
+- [ ] Refresh models in the app.
+- [ ] Confirm the model picker matches the installed models returned by `/api/tags`.
+- [ ] If practical, remove or rename a previously selected model and confirm refresh removes the stale selection.
+- [ ] Pull a new model and confirm it appears in the picker only after a live refresh returns it.
+- [ ] Open Settings Diagnostics and confirm model source, count, last refresh time, state, and last refresh error are clear and secretless.
+
+## Sidebar Stability
+
+- [ ] Open the app with several chats visible.
+- [ ] Select a chat.
+- [ ] Type a long prompt slowly and quickly.
+- [ ] Confirm the sidebar does not jump, reorder, resize, or change selection while typing.
+- [ ] Send the message.
+- [ ] Confirm the sidebar updates only after the accepted send.
+- [ ] Switch chats mid-stream and confirm the sidebar remains stable.
+
 ## Composer Flow
 
 - [ ] Type a normal message and send with Command+Enter.

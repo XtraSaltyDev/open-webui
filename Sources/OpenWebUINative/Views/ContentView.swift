@@ -6,7 +6,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             SidebarView(store: store)
-                .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 360)
+                .navigationSplitViewColumnWidth(min: 300, ideal: 300, max: 300)
         } detail: {
             if let detail = store.selectedKnowledgeDocumentDetail {
                 KnowledgeDocumentDetailView(detail: detail, focusedChunkID: store.selectedKnowledgeChunkID)

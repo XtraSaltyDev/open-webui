@@ -51,7 +51,12 @@ final class AppDiagnosticsTests: XCTestCase {
             selectedThreadID: selectedThreadID,
             activeStreamingBranchCount: 1,
             latestAutomaticBackupTimestamp: Date(timeIntervalSince1970: 100),
-            recentErrorSummary: "Recovered 1 chat record."
+            recentErrorSummary: "Recovered 1 chat record.",
+            modelRefreshSource: .openAICompatible,
+            modelRefreshState: .live,
+            lastModelRefreshTimestamp: Date(timeIntervalSince1970: 200),
+            lastModelRefreshError: nil,
+            modelRefreshCount: 3
         )
 
         XCTAssertEqual(snapshot.appDataRootPath, "/tmp/OpenWebUINative")
@@ -63,6 +68,11 @@ final class AppDiagnosticsTests: XCTestCase {
         XCTAssertEqual(snapshot.activeProviderBaseURL, "https://gateway.example/v1")
         XCTAssertEqual(snapshot.providerHealthStatus, "Gateway connected")
         XCTAssertEqual(snapshot.modelCount, 2)
+        XCTAssertEqual(snapshot.modelRefreshSource, "OpenAI-compatible /models")
+        XCTAssertEqual(snapshot.modelRefreshState, "Live")
+        XCTAssertEqual(snapshot.lastModelRefreshTimestamp, Date(timeIntervalSince1970: 200))
+        XCTAssertNil(snapshot.lastModelRefreshError)
+        XCTAssertEqual(snapshot.modelRefreshCount, 3)
         XCTAssertEqual(snapshot.selectedModelIDs, ["gpt-test", "gpt-backup"])
         XCTAssertEqual(snapshot.selectedEmbeddingModelID, "text-embedding-3-small")
         XCTAssertEqual(snapshot.chatCount, 2)

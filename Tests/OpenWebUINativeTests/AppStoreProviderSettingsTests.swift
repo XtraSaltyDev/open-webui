@@ -520,7 +520,7 @@ final class AppStoreProviderSettingsTests: XCTestCase {
         XCTAssertFalse(savedSettings.localExecution.isEnabled)
     }
 
-    func testRefreshModelsExplainsWhenProviderReturnsNoModels() async throws {
+    func testRefreshModelsShowsEmptyStateWhenProviderReturnsNoModels() async throws {
         let fixture = try ProviderSettingsFixture()
         let provider = HealthCheckProvider(status: .available("Gateway reachable"), models: [])
         let store = fixture.makeStore(secretStore: InMemorySecretStore(), provider: provider)
@@ -529,10 +529,9 @@ final class AppStoreProviderSettingsTests: XCTestCase {
 
         XCTAssertEqual(store.models, [])
         XCTAssertNil(store.settings.selectedModelID)
-        XCTAssertEqual(
-            store.providerStatus,
-            .unavailable("Gateway responded, but returned no models. Check the provider account, base URL, or model permissions.")
-        )
+        XCTAssertEqual(store.modelRefreshSourceLabel, "OpenAI-compatible /models")
+        XCTAssertEqual(store.modelRefreshStateLabel, "Empty")
+        XCTAssertEqual(store.providerStatus, .available("Gateway connected (0 live models)"))
     }
 
     func testRefreshModelsSurfacesRecoveryNoticeWhenSelectedModelDisappears() async throws {

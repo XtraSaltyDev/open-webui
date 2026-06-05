@@ -23,6 +23,9 @@ struct SidebarView: View {
         List(selection: Binding(
             get: { store.selectedThreadID },
             set: { threadID in
+                guard store.selectedThreadID != threadID else {
+                    return
+                }
                 store.selectedThreadID = threadID
                 store.focusedChatMessageID = nil
                 if threadID != nil {

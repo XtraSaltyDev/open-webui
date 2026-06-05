@@ -443,6 +443,21 @@ struct SettingsView: View {
                 LabeledContent("Model count") {
                     Text("\(diagnostics.modelCount)")
                 }
+                LabeledContent("Model source") {
+                    Text(diagnostics.modelRefreshSource)
+                }
+                LabeledContent("Model list state") {
+                    Text(diagnostics.modelRefreshState)
+                }
+                LabeledContent("Last model refresh") {
+                    Text(diagnostics.lastModelRefreshTimestamp?.formatted(date: .abbreviated, time: .shortened) ?? "Never")
+                }
+                LabeledContent("Model refresh count") {
+                    Text("\(diagnostics.modelRefreshCount)")
+                }
+                LabeledContent("Last model refresh error") {
+                    Text(diagnostics.lastModelRefreshError ?? "None").textSelection(.enabled)
+                }
                 LabeledContent("Selected models") {
                     Text(diagnostics.currentModelSelectionSummary)
                 }

@@ -98,7 +98,7 @@ struct FirstRunSetupView: View {
 
                     if providerKind == .ollama, store.models.isEmpty {
                         HStack {
-                            TextField("Pull model", text: $store.newOllamaModelName)
+                            TextField("Pull model, e.g. llama3.2", text: $store.newOllamaModelName)
                                 .textFieldStyle(.roundedBorder)
 
                             Button("Pull") {

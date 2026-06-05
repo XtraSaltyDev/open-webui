@@ -46,6 +46,11 @@ struct AppDiagnosticsSnapshot: Equatable, Sendable {
     var latestOllamaHealthError: String?
     var latestOllamaChatTestErrorSummary: String?
     var modelCount: Int
+    var modelRefreshSource: String
+    var modelRefreshState: String
+    var lastModelRefreshTimestamp: Date?
+    var lastModelRefreshError: String?
+    var modelRefreshCount: Int
     var selectedModelIDs: [String]
     var selectedEmbeddingModelID: String?
     var chatCount: Int
@@ -78,6 +83,9 @@ struct AppDiagnosticsSnapshot: Equatable, Sendable {
             selectedOllamaModelID ?? "",
             latestOllamaHealthError ?? "",
             latestOllamaChatTestErrorSummary ?? "",
+            modelRefreshSource,
+            modelRefreshState,
+            lastModelRefreshError ?? "",
             selectedModelIDs.joined(separator: " "),
             selectedEmbeddingModelID ?? "",
             selectedThreadID?.uuidString ?? "",
@@ -103,6 +111,11 @@ struct AppDiagnosticsSnapshot: Equatable, Sendable {
         ollamaRuntimeStatus: OllamaRuntimeStatus = .notConfigured,
         ollamaOwnsRunningCLIProcess: Bool = false,
         latestOllamaChatTestErrorSummary: String? = nil,
+        modelRefreshSource: ModelRefreshSource = .notLoaded,
+        modelRefreshState: ModelRefreshState = .notLoaded,
+        lastModelRefreshTimestamp: Date? = nil,
+        lastModelRefreshError: String? = nil,
+        modelRefreshCount: Int = 0,
         bundle: Bundle = .main
     ) -> AppDiagnosticsSnapshot {
         let selectedThread = selectedThreadID.flatMap { id in
@@ -144,6 +157,11 @@ struct AppDiagnosticsSnapshot: Equatable, Sendable {
             latestOllamaHealthError: latestOllamaHealthError,
             latestOllamaChatTestErrorSummary: latestOllamaChatTestErrorSummary,
             modelCount: models.count,
+            modelRefreshSource: modelRefreshSource.label,
+            modelRefreshState: modelRefreshState.label,
+            lastModelRefreshTimestamp: lastModelRefreshTimestamp,
+            lastModelRefreshError: lastModelRefreshError,
+            modelRefreshCount: modelRefreshCount,
             selectedModelIDs: selectedModelIDs,
             selectedEmbeddingModelID: settings.embeddingModelID,
             chatCount: threads.count,
