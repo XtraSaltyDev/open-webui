@@ -245,3 +245,139 @@ struct WorkspaceBackupService: Sendable {
         try JSONDecoder.openWebUIDecoder.decode(WorkspaceBackup.self, from: data)
     }
 }
+
+struct AutomaticWorkspaceBackupService: Sendable {
+    private let rootURL: URL
+    private let backupService: WorkspaceBackupService
+
+    init(
+        rootURL: URL = AutomaticWorkspaceBackupService.defaultRootURL(),
+        backupService: WorkspaceBackupService = WorkspaceBackupService()
+    ) {
+        self.rootURL = rootURL
+        self.backupService = backupService
+    }
+
+    var rootDirectoryURL: URL {
+        rootURL
+    }
+
+    @discardableResult
+    func saveSafetyBackup(_ backup: WorkspaceBackup, timestamp: Date = Date()) throws -> URL {
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let url = uniqueBackupURL(for: timestamp)
+        let data = try backupService.jsonData(for: backup)
+        try data.write(to: url, options: [.atomic])
+        try pruneOldBackups()
+        return url
+    }
+
+    func listSafetyBackups() throws -> [AutomaticWorkspaceBackup] {
+        try ensureBackupDirectoryExists()
+        return try FileManager.default.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: [
+                .contentModificationDateKey,
+                .fileSizeKey
+            ]
+        )
+        .filter { $0.pathExtension == "json" }
+        .compactMap { url in
+            let values = try url.resourceValues(forKeys: [
+                .contentModificationDateKey,
+                .fileSizeKey
+            ])
+            return AutomaticWorkspaceBackup(
+                url: url,
+                timestamp: Self.timestamp(from: url)
+                    ?? values.contentModificationDate
+                    ?? .distantPast,
+                byteCount: values.fileSize ?? 0
+            )
+        }
+        .sorted {
+            if $0.timestamp != $1.timestamp {
+                return $0.timestamp > $1.timestamp
+            }
+            return $0.fileName > $1.fileName
+        }
+    }
+
+    func ensureBackupDirectoryExists() throws {
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+    }
+
+    private func pruneOldBackups() throws {
+        let backupURLs = try FileManager.default.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: nil
+        )
+        .filter { $0.pathExtension == "json" }
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        let staleURLs = backupURLs.dropLast(10)
+        for url in staleURLs {
+            try FileManager.default.removeItem(at: url)
+        }
+    }
+
+    private static func defaultRootURL() -> URL {
+        let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)
+            .first ?? FileManager.default.temporaryDirectory
+        return appSupport
+            .appendingPathComponent("OpenWebUINative", isDirectory: true)
+            .appendingPathComponent("Backups", isDirectory: true)
+    }
+
+    private static func timestampString(from date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.string(from: date)
+    }
+
+    private func uniqueBackupURL(for timestamp: Date) -> URL {
+        let fileName = "open-webui-native-safety-backup-\(Self.timestampString(from: timestamp)).json"
+        let url = rootURL.appendingPathComponent(fileName)
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return url
+        }
+        let suffix = UUID().uuidString.prefix(8)
+        return rootURL.appendingPathComponent(
+            "open-webui-native-safety-backup-\(Self.timestampString(from: timestamp))-\(suffix).json"
+        )
+    }
+
+    private static func timestamp(from url: URL) -> Date? {
+        let prefix = "open-webui-native-safety-backup-"
+        var value = url.deletingPathExtension().lastPathComponent
+        guard value.hasPrefix(prefix) else {
+            return nil
+        }
+        value.removeFirst(prefix.count)
+        value = String(value.prefix(15))
+
+        let formatter = DateFormatter()
+        formatter.calendar = Calendar(identifier: .gregorian)
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyyMMdd-HHmmss"
+        return formatter.date(from: value)
+    }
+}
+
+struct AutomaticWorkspaceBackup: Identifiable, Equatable, Sendable {
+    var url: URL
+    var timestamp: Date
+    var byteCount: Int
+
+    var id: String {
+        url.path
+    }
+
+    var fileName: String {
+        url.lastPathComponent
+    }
+}

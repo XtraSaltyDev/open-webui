@@ -5,6 +5,8 @@ enum ProviderError: Error, LocalizedError, Equatable {
     case invalidResponse
     case httpStatus(Int)
     case missingAPIKey(String)
+    case noModelsReturned(String)
+    case selectedModelUnavailable(String)
     case noModelSelected
     case emptyPrompt
     case unsupportedAttachment(String)
@@ -28,6 +30,10 @@ enum ProviderError: Error, LocalizedError, Equatable {
             return "The provider returned HTTP \(statusCode)."
         case .missingAPIKey(let providerName):
             return "Add an API key for \(providerName) before connecting."
+        case .noModelsReturned(let providerName):
+            return "\(providerName) responded, but returned no models."
+        case .selectedModelUnavailable(let modelID):
+            return "The selected model \(modelID) is no longer available."
         case .noModelSelected:
             return "Choose a model before sending a message."
         case .emptyPrompt:
@@ -123,11 +129,14 @@ struct OllamaClient {
             let version = try await runtimeVersion()
             let models = try await listModels()
             let runningModelCount = try await runningModelCount()
+            guard !models.isEmpty else {
+                throw ProviderError.noModelsReturned(configuration.name)
+            }
             return .available(
                 "Ollama \(version) connected (\(models.count) models, \(runningModelCount) running)"
             )
         } catch {
-            return .unavailable(error.localizedDescription)
+            return .unavailable(ProviderErrorPresentation.presentation(for: error, provider: configuration).message)
         }
     }
 

@@ -422,6 +422,142 @@ final class AppStoreWorkspaceBackupTests: XCTestCase {
         XCTAssertNil(event.metadata["content"])
         XCTAssertNil(event.metadata["message"])
     }
+
+    func testImportWorkspaceBackupCreatesAutomaticSafetyBackupBeforeReplacingData() async throws {
+        let sourceFixture = try WorkspaceBackupFixture()
+        let sourceStore = sourceFixture.makeStore()
+        await sourceStore.load()
+        await sourceStore.createPrompt(title: "Restored prompt", content: "Use this.")
+        let data = try await sourceStore.exportWorkspaceBackupJSONData()
+
+        let destinationFixture = try WorkspaceBackupFixture()
+        let destinationStore = destinationFixture.makeStore()
+        await destinationStore.load()
+        await destinationStore.createPrompt(title: "Stale prompt", content: "Save this before restore.")
+
+        try await destinationStore.importWorkspaceBackupJSONData(data)
+
+        let backupURLs = try FileManager.default.contentsOfDirectory(
+            at: destinationFixture.automaticBackupRootURL,
+            includingPropertiesForKeys: nil
+        )
+        .filter { $0.pathExtension == "json" }
+        XCTAssertEqual(backupURLs.count, 1)
+
+        let backupData = try Data(contentsOf: try XCTUnwrap(backupURLs.first))
+        let safetyBackup = try WorkspaceBackupService().backup(fromJSONData: backupData)
+        XCTAssertEqual(safetyBackup.prompts.map(\.title), ["Stale prompt"])
+        XCTAssertEqual(destinationStore.prompts.map(\.title), ["Restored prompt"])
+    }
+
+    func testAutomaticWorkspaceBackupsKeepLatestTenFiles() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let service = AutomaticWorkspaceBackupService(rootURL: rootURL)
+        let backup = WorkspaceBackup(
+            settings: AppSettings(),
+            threads: [],
+            folders: [],
+            prompts: [],
+            notes: [],
+            tools: [],
+            functions: [],
+            skills: [],
+            feedbacks: [],
+            adminDirectory: AdminDirectorySnapshot(),
+            channels: [],
+            automations: [],
+            calendar: CalendarSnapshot(),
+            playgroundHistory: [],
+            knowledge: KnowledgeSnapshot()
+        )
+
+        for index in 0..<11 {
+            try service.saveSafetyBackup(
+                backup,
+                timestamp: Date(timeIntervalSince1970: TimeInterval(index))
+            )
+        }
+
+        let backupURLs = try FileManager.default.contentsOfDirectory(
+            at: rootURL,
+            includingPropertiesForKeys: nil
+        )
+        .filter { $0.pathExtension == "json" }
+
+        XCTAssertEqual(backupURLs.count, 10)
+        XCTAssertFalse(backupURLs.contains { $0.lastPathComponent.contains("19700101-000000") })
+    }
+
+    func testAutomaticBackupListingShowsNewestFirstWithFileSizes() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let service = AutomaticWorkspaceBackupService(rootURL: rootURL)
+        let backup = WorkspaceBackup(
+            settings: AppSettings(),
+            threads: [],
+            folders: [],
+            prompts: [],
+            notes: [],
+            tools: [],
+            functions: [],
+            skills: [],
+            feedbacks: [],
+            adminDirectory: AdminDirectorySnapshot(),
+            channels: [],
+            automations: [],
+            calendar: CalendarSnapshot(),
+            playgroundHistory: [],
+            knowledge: KnowledgeSnapshot()
+        )
+
+        try service.saveSafetyBackup(backup, timestamp: Date(timeIntervalSince1970: 100))
+        try service.saveSafetyBackup(backup, timestamp: Date(timeIntervalSince1970: 200))
+
+        let items = try service.listSafetyBackups()
+
+        XCTAssertEqual(items.count, 2)
+        XCTAssertGreaterThan(items[0].timestamp, items[1].timestamp)
+        XCTAssertGreaterThan(items[0].byteCount, 0)
+        XCTAssertTrue(items[0].fileName.contains("open-webui-native-safety-backup"))
+    }
+
+    func testManualAutomaticBackupExportWritesCurrentWorkspaceBackup() async throws {
+        let fixture = try WorkspaceBackupFixture()
+        let store = fixture.makeStore()
+        await store.load()
+        await store.createPrompt(title: "Manual backup prompt", content: "Preserve this.")
+
+        await store.exportCurrentWorkspaceSafetyBackup()
+
+        XCTAssertEqual(store.automaticBackups.count, 1)
+        let backupData = try Data(contentsOf: store.automaticBackups[0].url)
+        let backup = try WorkspaceBackupService().backup(fromJSONData: backupData)
+        XCTAssertEqual(backup.prompts.map(\.title), ["Manual backup prompt"])
+        XCTAssertTrue(backup.excludesSecrets)
+    }
+
+    func testRestoreAutomaticBackupCreatesPreRestoreSafetyBackup() async throws {
+        let fixture = try WorkspaceBackupFixture()
+        let store = fixture.makeStore()
+        await store.load()
+        await store.createPrompt(title: "Original prompt", content: "Restore me.")
+        await store.exportCurrentWorkspaceSafetyBackup()
+        let backupID = try XCTUnwrap(store.automaticBackups.first?.id)
+
+        await store.createPrompt(title: "Current prompt", content: "Back this up before restore.")
+
+        await store.restoreAutomaticBackup(id: backupID)
+
+        XCTAssertEqual(store.prompts.map(\.title), ["Original prompt"])
+        XCTAssertEqual(store.automaticBackups.count, 2)
+        let preRestoreBackup = try store.automaticBackups
+            .map { try WorkspaceBackupService().backup(fromJSONData: Data(contentsOf: $0.url)) }
+            .first { backup in
+                backup.prompts.contains { $0.title == "Current prompt" }
+            }
+        XCTAssertNotNil(preRestoreBackup)
+    }
 }
 
 private struct WorkspaceBackupFixture {
@@ -451,6 +587,7 @@ private struct WorkspaceBackupFixture {
     let knowledgeStorage: JSONKnowledgeStorageService
     let knowledgeService: KnowledgeService
     let settingsStore: SettingsStore
+    let automaticBackupRootURL: URL
 
     init() throws {
         rootURL = FileManager.default.temporaryDirectory
@@ -500,6 +637,7 @@ private struct WorkspaceBackupFixture {
         knowledgeStorage = JSONKnowledgeStorageService(rootURL: rootURL.appendingPathComponent("Knowledge", isDirectory: true))
         knowledgeService = KnowledgeService(storage: knowledgeStorage)
         settingsStore = SettingsStore(settingsURL: rootURL.appendingPathComponent("settings.json"))
+        automaticBackupRootURL = rootURL.appendingPathComponent("Backups", isDirectory: true)
         try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
     }
 
@@ -524,6 +662,7 @@ private struct WorkspaceBackupFixture {
             toolRunStorage: toolRunStorage,
             toolServerStorage: toolServerStorage,
             toolServerRunStorage: toolServerRunStorage,
+            automaticWorkspaceBackupService: AutomaticWorkspaceBackupService(rootURL: automaticBackupRootURL),
             functionStorage: functionStorage,
             functionRunStorage: functionRunStorage,
             skillStorage: skillStorage,

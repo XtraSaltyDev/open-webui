@@ -163,7 +163,7 @@ final class AppStoreMultiModelTests: XCTestCase {
         }
         try await Task.sleep(nanoseconds: 35_000_000)
         store.cancelCurrentSend()
-        await sendTask.value
+        _ = await sendTask.value
 
         let assistantMessages = try XCTUnwrap(store.selectedThread?.messages.filter { $0.role == .assistant })
         XCTAssertEqual(assistantMessages.map(\.isStreaming), [false, false])
@@ -191,7 +191,7 @@ final class AppStoreMultiModelTests: XCTestCase {
         let streamingMessages = try XCTUnwrap(store.selectedThread?.messages.filter { $0.role == .assistant })
         let cancelledMessageID = try XCTUnwrap(streamingMessages.first?.id)
         store.cancelAssistantBranch(messageID: cancelledMessageID)
-        await sendTask.value
+        _ = await sendTask.value
 
         let assistantMessages = try XCTUnwrap(store.selectedThread?.messages.filter { $0.role == .assistant })
         XCTAssertEqual(assistantMessages.map(\.modelID), ["model-a", "model-b"])
@@ -227,7 +227,7 @@ final class AppStoreMultiModelTests: XCTestCase {
         XCTAssertEqual(store.streamingAssistantBranchCount, 1)
         XCTAssertEqual(store.chatGenerationProgressText, "1 response generating")
 
-        await sendTask.value
+        _ = await sendTask.value
 
         XCTAssertEqual(store.streamingAssistantBranchCount, 0)
         XCTAssertNil(store.chatGenerationProgressText)
@@ -254,7 +254,53 @@ final class AppStoreMultiModelTests: XCTestCase {
         let cancelledModels = await provider.cancelledStreamModels()
         XCTAssertEqual(cancelledModels, ["model-a"])
 
-        await sendTask.value
+        _ = await sendTask.value
+    }
+
+    func testStreamingBranchFinalizesOriginalThreadAfterSelectingAnotherThread() async throws {
+        let provider = SlowStreamingMultiModelProvider()
+        let fixture = try MultiModelFixture(provider: provider)
+        let store = fixture.makeStore()
+        await store.load()
+        await store.setModel("model-a", selected: true)
+
+        let sendTask = Task {
+            await store.send("Keep generating")
+        }
+        try await Task.sleep(nanoseconds: 35_000_000)
+        let generatingThreadID = try XCTUnwrap(store.selectedThreadID)
+
+        store.createThread()
+        XCTAssertNotEqual(store.selectedThreadID, generatingThreadID)
+
+        _ = await sendTask.value
+
+        let originalThread = try XCTUnwrap(store.threads.first { $0.id == generatingThreadID })
+        let assistantMessages = originalThread.messages.filter { $0.role == .assistant }
+        XCTAssertEqual(assistantMessages.count, 1)
+        XCTAssertEqual(assistantMessages.first?.content.count, 20)
+        XCTAssertEqual(assistantMessages.first?.isStreaming, false)
+        XCTAssertNil(assistantMessages.first?.error)
+    }
+
+    func testCancelCurrentSendDoesNotDuplicateAssistantMessages() async throws {
+        let provider = SlowStreamingMultiModelProvider()
+        let fixture = try MultiModelFixture(provider: provider)
+        let store = fixture.makeStore()
+        await store.load()
+        await store.setModel("model-a", selected: true)
+        await store.setModel("model-b", selected: true)
+
+        let sendTask = Task {
+            await store.send("Compare answers")
+        }
+        try await Task.sleep(nanoseconds: 35_000_000)
+        store.cancelCurrentSend()
+        _ = await sendTask.value
+
+        let assistantMessages = try XCTUnwrap(store.selectedThread?.messages.filter { $0.role == .assistant })
+        XCTAssertEqual(assistantMessages.count, 2)
+        XCTAssertEqual(assistantMessages.map(\.modelID), ["model-a", "model-b"])
     }
 }
 

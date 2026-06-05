@@ -6,19 +6,25 @@ struct LocalToolInvocationRequest: Equatable, Sendable {
     var arguments: JSONValue
     var argumentsBody: String
     var timeoutSeconds: Double
+    var workingDirectoryPath: String?
+    var maxCapturedOutputBytes: Int?
 
     init(
         tool: AppTool,
         functionName: String,
         arguments: JSONValue = .object([:]),
         argumentsBody: String = "{}",
-        timeoutSeconds: Double = 10
+        timeoutSeconds: Double = 10,
+        workingDirectoryPath: String? = nil,
+        maxCapturedOutputBytes: Int? = nil
     ) {
         self.tool = tool
         self.functionName = functionName
         self.arguments = arguments
         self.argumentsBody = argumentsBody
         self.timeoutSeconds = timeoutSeconds
+        self.workingDirectoryPath = workingDirectoryPath
+        self.maxCapturedOutputBytes = maxCapturedOutputBytes
     }
 }
 

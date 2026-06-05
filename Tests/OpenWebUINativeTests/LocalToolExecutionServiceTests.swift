@@ -123,6 +123,39 @@ final class LocalToolExecutionServiceTests: XCTestCase {
         XCTAssertEqual(schema.objectValue?["type"], .string("object"))
         XCTAssertEqual(schema.objectValue?["properties"]?.objectValue?["api_key"]?.objectValue?["default"], .string("secret"))
     }
+
+    func testPythonToolInvocationDrainsLargeStdoutAndStderrWithoutDeadlock() async throws {
+        let service = LocalToolExecutionService()
+        let tool = AppTool(
+            name: "Noisy lookup",
+            content: """
+            import sys
+
+            class Tools:
+                def noisy(self):
+                    sys.stdout.write("o" * 120000)
+                    sys.stderr.write("e" * 120000)
+                    return "done"
+            """
+        )
+
+        let run = await service.invoke(
+            LocalToolInvocationRequest(
+                tool: tool,
+                functionName: "noisy",
+                arguments: .object([:]),
+                argumentsBody: "{}",
+                timeoutSeconds: 3,
+                maxCapturedOutputBytes: 300_000
+            )
+        )
+
+        XCTAssertEqual(run.status, .succeeded)
+        XCTAssertEqual(run.exitCode, 0)
+        XCTAssertGreaterThanOrEqual(run.output.utf8.count, 120_000)
+        XCTAssertGreaterThanOrEqual(run.stderr.utf8.count, 120_000)
+        XCTAssertNil(run.errorMessage)
+    }
 }
 
 final class JSONToolRunStorageServiceTests: XCTestCase {

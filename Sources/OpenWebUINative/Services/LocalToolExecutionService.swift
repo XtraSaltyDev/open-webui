@@ -16,11 +16,6 @@ struct LocalToolExecutionService: LocalToolExecuting {
 
 private func invokeSynchronously(_ request: LocalToolInvocationRequest, encoder: JSONEncoder) -> AppToolRun {
     let startedAt = Date()
-    let process = Process()
-    let stdoutPipe = Pipe()
-    let stderrPipe = Pipe()
-    let stdinPipe = Pipe()
-    var timedOut = false
 
     guard let argumentsData = try? encoder.encode(request.arguments) else {
         return failedToolRun(
@@ -33,64 +28,27 @@ private func invokeSynchronously(_ request: LocalToolInvocationRequest, encoder:
         )
     }
 
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-    process.arguments = ["-c", pythonInvocationScript(for: request)]
-    process.standardOutput = stdoutPipe
-    process.standardError = stderrPipe
-    process.standardInput = stdinPipe
-
-    do {
-        try process.run()
-        stdinPipe.fileHandleForWriting.write(argumentsData)
-        try? stdinPipe.fileHandleForWriting.close()
-    } catch {
-        return failedToolRun(
-            request,
-            output: "",
-            stderr: error.localizedDescription,
-            status: .failed,
-            exitCode: nil,
-            startedAt: startedAt
-        )
-    }
-
-    let timeout = max(request.timeoutSeconds, 0.1)
-    let deadline = Date().addingTimeInterval(timeout)
-    while process.isRunning {
-        if Date() >= deadline {
-            timedOut = true
-            process.terminate()
-            break
-        }
-        Thread.sleep(forTimeInterval: 0.02)
-    }
-
-    process.waitUntilExit()
-
-    let output = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    let status: CodeExecutionStatus
-    let exitCode: Int32?
-    if timedOut {
-        status = .timedOut
-        exitCode = nil
-    } else {
-        exitCode = process.terminationStatus
-        status = process.terminationStatus == 0 ? .succeeded : .failed
-    }
+    let result = BoundedProcessRunner().run(
+        executablePath: "/usr/bin/python3",
+        arguments: ["-c", pythonInvocationScript(for: request)],
+        workingDirectoryPath: request.workingDirectoryPath,
+        stdinData: argumentsData,
+        timeoutSeconds: request.timeoutSeconds,
+        maxCapturedOutputBytes: request.maxCapturedOutputBytes ?? CodeExecutionSettings().maxCapturedOutputBytes
+    )
 
     return AppToolRun(
         toolID: request.tool.id,
         toolName: request.tool.name,
         functionName: request.functionName,
         argumentsBody: request.argumentsBody,
-        output: output,
-        stderr: stderr,
-        status: status,
-        exitCode: exitCode,
-        errorMessage: toolRunErrorMessage(status: status, stderr: stderr),
-        startedAt: startedAt,
-        completedAt: Date()
+        output: result.stdout,
+        stderr: result.stderr,
+        status: result.status,
+        exitCode: result.exitCode,
+        errorMessage: toolRunErrorMessage(status: result.status, stderr: result.stderr),
+        startedAt: result.startedAt,
+        completedAt: result.completedAt
     )
 }
 

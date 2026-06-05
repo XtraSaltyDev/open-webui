@@ -23,6 +23,14 @@ private struct SkillSearchQuery {
     var isActive: Bool?
 }
 
+private struct LocalExecutionBlockedError: LocalizedError {
+    let reason: String
+
+    var errorDescription: String? {
+        reason
+    }
+}
+
 @MainActor
 final class AppStore: ObservableObject {
     @Published var threads: [ChatThread] = []
@@ -32,6 +40,7 @@ final class AppStore: ObservableObject {
     @Published var providerStatus: ProviderStatus = .unknown
     @Published var settings: AppSettings = AppSettings()
     @Published var draftPrompt: String = ""
+    @Published var composerInlineMessage: String?
     @Published var pendingAttachments: [ChatAttachment] = []
     @Published var files: [AppFile] = []
     @Published var fileSearchText: String = ""
@@ -189,6 +198,8 @@ final class AppStore: ObservableObject {
     @Published var isSending: Bool = false
     @Published var isCancellingSend: Bool = false
     @Published var errorMessage: String?
+    @Published var recoveryNotice: String?
+    @Published var automaticBackups: [AutomaticWorkspaceBackup] = []
 
     private let storage: JSONStorageService
     private let folderStorage: JSONFolderStorageService
@@ -257,6 +268,7 @@ final class AppStore: ObservableObject {
     private let calendarReminderNotificationService: CalendarReminderNotificationService
     private let calendarReminderDeliverer: any CalendarReminderDelivering
     private let workspaceBackupService: WorkspaceBackupService
+    private let automaticWorkspaceBackupService: AutomaticWorkspaceBackupService
     private var activeSendID: UUID?
     private var cancelledSendIDs: Set<UUID> = []
     private var cancelledAssistantBranchIDs: Set<UUID> = []
@@ -319,6 +331,7 @@ final class AppStore: ObservableObject {
         toolServerStorage: JSONToolServerStorageService = JSONToolServerStorageService(),
         toolServerChecker: any ToolServerChecking = ToolServerCheckService(),
         toolServerRunStorage: JSONToolServerRunStorageService = JSONToolServerRunStorageService(),
+        automaticWorkspaceBackupService: AutomaticWorkspaceBackupService = AutomaticWorkspaceBackupService(),
         toolServerInvoker: any ToolServerInvoking = ToolServerInvocationService(),
         toolServerDiscoverer: any ToolServerToolDiscovering = ToolServerMCPDiscoveryService(),
         toolServerToolCaller: any ToolServerToolCalling = ToolServerMCPDiscoveryService(),
@@ -398,6 +411,7 @@ final class AppStore: ObservableObject {
         self.calendarReminderNotificationService = calendarReminderNotificationService
         self.calendarReminderDeliverer = calendarReminderDeliverer
         self.workspaceBackupService = workspaceBackupService
+        self.automaticWorkspaceBackupService = automaticWorkspaceBackupService
     }
 
     var selectedThread: ChatThread? {
@@ -409,6 +423,12 @@ final class AppStore: ObservableObject {
 
     var streamingAssistantBranchCount: Int {
         selectedThread?.messages.filter { $0.role == .assistant && $0.isStreaming }.count ?? 0
+    }
+
+    var activeStreamingBranchCount: Int {
+        threads.reduce(0) { count, thread in
+            count + thread.messages.filter { $0.role == .assistant && $0.isStreaming }.count
+        }
     }
 
     var chatGenerationProgressText: String? {
@@ -435,6 +455,21 @@ final class AppStore: ObservableObject {
 
     var selectedEmbeddingModelID: String? {
         settings.embeddingModelID ?? embeddingModelCandidates.first?.id ?? selectedModelID
+    }
+
+    var modelEmptyStateMessage: String? {
+        guard models.isEmpty else {
+            return nil
+        }
+
+        switch activeProvider.kind {
+        case .ollama:
+            return "No Ollama models found. Start Ollama or pull a model."
+        case .openAICompatible:
+            return "No models found. Check the base URL, API key, and models endpoint."
+        case .localFunction:
+            return "No local function chat models are active."
+        }
     }
 
     var activeProvider: ProviderConfiguration {
@@ -622,6 +657,29 @@ final class AppStore: ObservableObject {
         .current
     }
 
+    var diagnosticsSnapshot: AppDiagnosticsSnapshot {
+        AppDiagnosticsSnapshot.make(
+            settings: settings,
+            paths: appDataPaths,
+            providerStatus: providerStatus,
+            models: models,
+            threads: threads,
+            selectedThreadID: selectedThreadID,
+            activeStreamingBranchCount: activeStreamingBranchCount,
+            latestAutomaticBackupTimestamp: automaticBackups.first?.timestamp,
+            recentErrorSummary: recoveryNotice ?? errorMessage
+        )
+    }
+
+    var appDataPaths: AppDataPaths {
+        AppDataPaths(
+            appDataRootURL: settingsStore.appDataRootURL,
+            settingsURL: settingsStore.settingsFileURL,
+            chatStorageURL: storage.rootDirectoryURL,
+            backupRootURL: automaticWorkspaceBackupService.rootDirectoryURL
+        )
+    }
+
     var visibleCalendars: [AppCalendar] {
         var result = calendars.filter { currentUserCanAccessCalendar($0) }
         if isFeatureEnabled(.automations),
@@ -665,36 +723,7 @@ final class AppStore: ObservableObject {
     }
 
     func exportWorkspaceBackupJSONData() async throws -> Data {
-        let backup = workspaceBackupService.backup(
-            settings: settings,
-            threads: threads,
-            folders: folders,
-            files: files,
-            prompts: prompts,
-            notes: notes,
-            tools: tools,
-            toolRuns: toolRuns,
-            toolServers: toolServers,
-            toolServerRuns: toolServerRuns,
-            functions: functions,
-            functionRuns: functionRuns,
-            skills: skills,
-            feedbacks: feedbacks,
-            adminDirectory: AdminDirectorySnapshot(users: adminUsers, groups: adminGroups),
-            channels: channels,
-            automations: automations,
-            automationRuns: automationRuns,
-            calendar: CalendarSnapshot(calendars: calendars, events: calendarEvents),
-            playgroundHistory: playgroundHistory,
-            generatedImages: generatedImages,
-            codeExecutionRuns: codeExecutionRuns,
-            terminalSessions: terminalSessions,
-            terminalCommands: terminalCommands,
-            audioHistory: audioHistory,
-            auditEvents: auditEvents,
-            knowledge: try await knowledgeService.loadSnapshot()
-        )
-        return try workspaceBackupService.jsonData(for: backup)
+        try await workspaceBackupService.jsonData(for: currentWorkspaceBackup())
     }
 
     func exportWorkspaceBackupJSONDataForUserAction() async throws -> Data {
@@ -773,6 +802,44 @@ final class AppStore: ObservableObject {
             Task { @MainActor in
                 await self?.importWorkspaceBackupJSON(from: url)
             }
+        }
+    }
+
+    func refreshAutomaticBackups() {
+        do {
+            automaticBackups = try automaticWorkspaceBackupService.listSafetyBackups()
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func revealAutomaticBackupFolderInFinder() {
+        NSWorkspace.shared.activateFileViewerSelecting([automaticWorkspaceBackupService.rootDirectoryURL])
+    }
+
+    func exportCurrentWorkspaceSafetyBackup() async {
+        do {
+            try automaticWorkspaceBackupService.saveSafetyBackup(try await currentWorkspaceBackup())
+            refreshAutomaticBackups()
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func restoreAutomaticBackup(id: AutomaticWorkspaceBackup.ID) async {
+        guard let backupItem = automaticBackups.first(where: { $0.id == id }) else {
+            errorMessage = "Backup not found."
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: backupItem.url)
+            let backup = try workspaceBackupService.backup(fromJSONData: data)
+            try await replaceWorkspace(with: backup)
+            refreshAutomaticBackups()
+        } catch {
+            errorMessage = error.localizedDescription
         }
     }
 
@@ -855,6 +922,38 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func completeFirstRunSetup() async {
+        settings.hasCompletedFirstRunSetup = true
+        do {
+            try await settingsStore.save(settings)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func skipFirstRunSetup() async {
+        settings.hasCompletedFirstRunSetup = true
+        settings.localExecution.isEnabled = false
+        settings.localExecution.hasAcceptedRiskWarning = false
+        if !settings.providers.contains(where: { $0.id == ProviderConfiguration.defaultOllamaID }) {
+            settings.providers.insert(ProviderConfiguration.defaultOllama(baseURL: settings.ollamaBaseURL), at: 0)
+        }
+        if !settings.providers.contains(where: { $0.id == settings.activeProviderID && $0.isEnabled }) {
+            settings.activeProviderID = ProviderConfiguration.defaultOllamaID
+            settings.selectedModelID = nil
+            settings.selectedModelIDs = []
+            settings.embeddingModelID = nil
+        }
+
+        do {
+            try await settingsStore.save(settings)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
     func updateCodeExecutionSettings(_ codeExecution: CodeExecutionSettings) async {
         let allowedLanguages = codeExecution.allowedLanguages.isEmpty
             ? CodeExecutionLanguage.allCases
@@ -886,9 +985,44 @@ final class AppStore: ObservableObject {
         }
     }
 
+    func updateLocalExecutionSettings(_ localExecution: LocalExecutionSettings) async {
+        let previousSandboxRoot = settings.localExecution.sandboxRootPath
+        var updatedLocalExecution = localExecution.normalized()
+        if !updatedLocalExecution.hasAcceptedRiskWarning {
+            updatedLocalExecution.isEnabled = false
+        }
+
+        let shouldMoveDefaultCodeRoots = settings.codeExecution.allowedWorkingDirectoryRoots == [previousSandboxRoot]
+            || settings.codeExecution.allowedWorkingDirectoryRoots == CodeExecutionSettings.defaultAllowedWorkingDirectoryRoots()
+            || settings.codeExecution.allowedWorkingDirectoryRoots == CodeExecutionSettings.previousBroadDefaultAllowedWorkingDirectoryRoots()
+
+        settings.localExecution = updatedLocalExecution
+        if shouldMoveDefaultCodeRoots {
+            settings.codeExecution.allowedWorkingDirectoryRoots = [updatedLocalExecution.sandboxRootPath]
+        }
+
+        do {
+            try settings.localExecution.ensureSandboxDirectoryExists()
+            try await settingsStore.save(settings)
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func resetLocalExecutionSandboxToSafeDefault() async {
+        var localExecution = settings.localExecution
+        localExecution.sandboxRootPath = LocalExecutionSettings.defaultSandboxRootPath()
+        settings.codeExecution.allowedWorkingDirectoryRoots = CodeExecutionSettings.defaultAllowedWorkingDirectoryRoots()
+        await updateLocalExecutionSettings(localExecution)
+    }
+
     func load() async {
         do {
+            recoveryNotice = nil
+            try automaticWorkspaceBackupService.ensureBackupDirectoryExists()
+            refreshAutomaticBackups()
             settings = try await settingsStore.load()
+            await verifyActiveProviderSecretIfNeeded()
             folders = try await folderStorage.loadFolders()
             files = try await fileStorage.loadFiles()
             prompts = try await promptStorage.loadPrompts()
@@ -943,7 +1077,22 @@ final class AppStore: ObservableObject {
             sortAudioHistory()
             sortCalendars()
             sortCalendarEvents()
-            threads = try await storage.loadThreads()
+            let threadLoadResult = try await storage.loadThreadsWithRecovery()
+            threads = threadLoadResult.records
+            if threadLoadResult.skippedCorruptRecordCount > 0 {
+                appendRecoveryNotice(
+                    "Recovered startup data: skipped \(threadLoadResult.skippedCorruptRecordCount) corrupt chat record\(threadLoadResult.skippedCorruptRecordCount == 1 ? "" : "s")."
+                )
+            }
+            let recoveredStreamingMessageCount = normalizeStaleStreamingMessages()
+            if recoveredStreamingMessageCount > 0 {
+                for thread in threads {
+                    try await storage.save(thread)
+                }
+                appendRecoveryNotice(
+                    "Recovered startup data: stopped \(recoveredStreamingMessageCount) interrupted streaming response\(recoveredStreamingMessageCount == 1 ? "" : "s")."
+                )
+            }
             sortThreads()
             try await refreshKnowledgeState()
             selectedThreadID = firstVisibleThreadID()
@@ -959,6 +1108,9 @@ final class AppStore: ObservableObject {
             let provider = try makeActiveProvider()
             let fetchedModels = try await provider.listModels()
             models = await modelsIncludingActivePipeFunctions(fetchedModels)
+            guard !models.isEmpty else {
+                throw ProviderError.noModelsReturned(provider.configuration.name)
+            }
             updateAudioModelDefaults(from: fetchedModels)
             let availableIDs = Set(models.map(\.id))
             let previousSelectedModelID = settings.selectedModelID
@@ -981,12 +1133,19 @@ final class AppStore: ObservableObject {
             if previousSelectedModelID != settings.selectedModelID
                 || previousSelectedModelIDs != settings.selectedModelIDs
                 || previousEmbeddingModelID != settings.embeddingModelID {
+                if let previousSelectedModelID,
+                   !availableIDs.contains(previousSelectedModelID),
+                   let selectedModelID = settings.selectedModelID {
+                    appendRecoveryNotice(
+                        "Recovered provider defaults: \(previousSelectedModelID) is no longer available, so \(selectedModelID) is selected."
+                    )
+                }
                 try await settingsStore.save(settings)
             }
             providerStatus = .available("\(provider.configuration.name) connected (\(models.count) models)")
         } catch {
             models = await modelsIncludingActivePipeFunctions([])
-            providerStatus = .unavailable(error.localizedDescription)
+            providerStatus = .unavailable(providerErrorMessage(for: error))
         }
     }
 
@@ -996,7 +1155,7 @@ final class AppStore: ObservableObject {
             let provider = try makeActiveProvider()
             providerStatus = await provider.healthCheck()
         } catch {
-            providerStatus = .unavailable(error.localizedDescription)
+            providerStatus = .unavailable(providerErrorMessage(for: error))
         }
     }
 
@@ -1975,6 +2134,12 @@ final class AppStore: ObservableObject {
             return
         }
 
+        guard let workingDirectoryPath = localExecutionWorkingDirectory(setError: { reason in
+            toolExecutionError = reason
+        }) else {
+            return
+        }
+
         isRunningTool = true
         toolExecutionError = nil
         errorMessage = nil
@@ -1988,7 +2153,9 @@ final class AppStore: ObservableObject {
                 functionName: resolvedFunctionName,
                 arguments: arguments,
                 argumentsBody: payload,
-                timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1))
+                timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1)),
+                workingDirectoryPath: workingDirectoryPath,
+                maxCapturedOutputBytes: settings.codeExecution.maxCapturedOutputBytes
             )
         )
 
@@ -2154,6 +2321,19 @@ final class AppStore: ObservableObject {
             return
         }
 
+        let workingDirectoryPath: String?
+        if server.kind == .stdio {
+            guard let allowedWorkingDirectoryPath = localExecutionWorkingDirectory(setError: { reason in
+                toolServerDiscoveryError = reason
+                toolServerDiscoveryStatuses[serverID] = .unavailable(reason)
+            }) else {
+                return
+            }
+            workingDirectoryPath = allowedWorkingDirectoryPath
+        } else {
+            workingDirectoryPath = nil
+        }
+
         isDiscoveringToolServerTools = true
         toolServerDiscoveryError = nil
         errorMessage = nil
@@ -2162,7 +2342,11 @@ final class AppStore: ObservableObject {
             isDiscoveringToolServerTools = false
         }
 
-        let result = await toolServerDiscoverer.discoverTools(for: server)
+        let result = await toolServerDiscoverer.discoverTools(
+            for: server,
+            workingDirectoryPath: workingDirectoryPath,
+            maxCapturedOutputBytes: settings.codeExecution.maxCapturedOutputBytes
+        )
         guard toolServers.contains(where: { $0.id == serverID }) else {
             return
         }
@@ -2197,6 +2381,18 @@ final class AppStore: ObservableObject {
             return
         }
 
+        let workingDirectoryPath: String?
+        if server.kind == .stdio {
+            guard let allowedWorkingDirectoryPath = localExecutionWorkingDirectory(setError: { reason in
+                toolServerInvocationError = reason
+            }) else {
+                return
+            }
+            workingDirectoryPath = allowedWorkingDirectoryPath
+        } else {
+            workingDirectoryPath = nil
+        }
+
         let trimmedBody = (requestBody ?? toolServerInvocationRequestBody)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         let payload = trimmedBody.isEmpty ? "{}" : trimmedBody
@@ -2208,7 +2404,12 @@ final class AppStore: ObservableObject {
         }
 
         let run = await toolServerInvoker.invoke(
-            ToolServerInvocationRequest(server: server, requestBody: payload)
+            ToolServerInvocationRequest(
+                server: server,
+                requestBody: payload,
+                workingDirectoryPath: workingDirectoryPath,
+                maxCapturedOutputBytes: settings.codeExecution.maxCapturedOutputBytes
+            )
         )
 
         do {
@@ -2259,6 +2460,18 @@ final class AppStore: ObservableObject {
             return
         }
 
+        let workingDirectoryPath: String?
+        if server.kind == .stdio {
+            guard let allowedWorkingDirectoryPath = localExecutionWorkingDirectory(setError: { reason in
+                toolServerInvocationError = reason
+            }) else {
+                return
+            }
+            workingDirectoryPath = allowedWorkingDirectoryPath
+        } else {
+            workingDirectoryPath = nil
+        }
+
         let trimmedBody = argumentsBody.trimmingCharacters(in: .whitespacesAndNewlines)
         let payload = trimmedBody.isEmpty ? "{}" : trimmedBody
         guard let data = payload.data(using: .utf8),
@@ -2284,7 +2497,13 @@ final class AppStore: ObservableObject {
         }
 
         let run = await toolServerToolCaller.callTool(
-            ToolServerToolCallRequest(server: server, toolName: toolName, arguments: arguments)
+            ToolServerToolCallRequest(
+                server: server,
+                toolName: toolName,
+                arguments: arguments,
+                workingDirectoryPath: workingDirectoryPath,
+                maxCapturedOutputBytes: settings.codeExecution.maxCapturedOutputBytes
+            )
         )
 
         do {
@@ -2455,6 +2674,12 @@ final class AppStore: ObservableObject {
             return
         }
 
+        guard let workingDirectoryPath = localExecutionWorkingDirectory(setError: { reason in
+            functionExecutionError = reason
+        }) else {
+            return
+        }
+
         isRunningFunction = true
         functionExecutionError = nil
         errorMessage = nil
@@ -2468,7 +2693,9 @@ final class AppStore: ObservableObject {
                 methodName: resolvedMethodName,
                 input: input,
                 inputBody: payload,
-                timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1))
+                timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1)),
+                workingDirectoryPath: workingDirectoryPath,
+                maxCapturedOutputBytes: settings.codeExecution.maxCapturedOutputBytes
             )
         )
 
@@ -2513,6 +2740,12 @@ final class AppStore: ObservableObject {
             return
         }
 
+        guard let workingDirectoryPath = localExecutionWorkingDirectory(setError: { reason in
+            functionExecutionError = reason
+        }) else {
+            return
+        }
+
         isRunningFunction = true
         functionExecutionError = nil
         errorMessage = nil
@@ -2528,7 +2761,9 @@ final class AppStore: ObservableObject {
                 methodName: "action",
                 input: input,
                 inputBody: jsonBodyString(for: input),
-                timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1))
+                timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1)),
+                workingDirectoryPath: workingDirectoryPath,
+                maxCapturedOutputBytes: settings.codeExecution.maxCapturedOutputBytes
             )
         )
 
@@ -6334,21 +6569,32 @@ final class AppStore: ObservableObject {
         }
     }
 
-    func sendDraftPrompt() async {
+    @discardableResult
+    func sendDraftPrompt() async -> Bool {
+        guard !isSending else {
+            setComposerError("A response is already generating. Stop it before sending another message.")
+            return false
+        }
+
         let trimmedPrompt = draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         if let savedPrompt = prompt(matchingCommand: trimmedPrompt) {
             let variables = promptVariableResolver.variables(in: savedPrompt.content)
             guard variables.isEmpty else {
-                errorMessage = "Prompt command \(savedPrompt.command ?? trimmedPrompt) requires variable values. Insert it from the prompt library."
-                return
+                setComposerError("Prompt command \(savedPrompt.command ?? trimmedPrompt) requires variable values. Insert it from the prompt library.")
+                return false
             }
 
             draftPrompt = ""
+            composerInlineMessage = nil
             insertPrompt(savedPrompt.id)
-            return
+            return true
         }
-        draftPrompt = ""
-        await send(trimmedPrompt)
+        if await send(trimmedPrompt) {
+            draftPrompt = ""
+            composerInlineMessage = nil
+            return true
+        }
+        return false
     }
 
     func importAttachment(from url: URL) async throws {
@@ -6819,7 +7065,7 @@ final class AppStore: ObservableObject {
             return
         }
         guard canCreateEmbeddings else {
-            errorMessage = ProviderError.unsupportedEmbeddings(activeProvider.name).localizedDescription
+            errorMessage = providerErrorMessage(for: ProviderError.unsupportedEmbeddings(activeProvider.name))
             return
         }
         guard let embeddingModel = selectedEmbeddingModelID else {
@@ -6856,7 +7102,7 @@ final class AppStore: ObservableObject {
             return
         }
         guard canCreateEmbeddings else {
-            errorMessage = ProviderError.unsupportedEmbeddings(activeProvider.name).localizedDescription
+            errorMessage = providerErrorMessage(for: ProviderError.unsupportedEmbeddings(activeProvider.name))
             return
         }
         guard let embeddingModel = selectedEmbeddingModelID else {
@@ -6893,7 +7139,7 @@ final class AppStore: ObservableObject {
             return
         }
         guard canCreateEmbeddings else {
-            errorMessage = ProviderError.unsupportedEmbeddings(activeProvider.name).localizedDescription
+            errorMessage = providerErrorMessage(for: ProviderError.unsupportedEmbeddings(activeProvider.name))
             return
         }
         guard let embeddingModel = selectedEmbeddingModelID else {
@@ -7241,8 +7487,9 @@ final class AppStore: ObservableObject {
             setPendingAudioFile(data: data, fileName: url.lastPathComponent, contentType: contentType)
             errorMessage = nil
         } catch {
-            audioError = error.localizedDescription
-            errorMessage = error.localizedDescription
+            let message = providerErrorMessage(for: error)
+            audioError = message
+            errorMessage = message
         }
     }
 
@@ -7318,8 +7565,9 @@ final class AppStore: ObservableObject {
             audioError = nil
             errorMessage = nil
         } catch {
-            audioError = error.localizedDescription
-            errorMessage = error.localizedDescription
+            let message = providerErrorMessage(for: error)
+            audioError = message
+            errorMessage = message
         }
 
         isRecordingAudio = false
@@ -7886,7 +8134,10 @@ final class AppStore: ObservableObject {
             timeoutSeconds: codeExecutionTimeoutSeconds
         )
 
-        let policyDecision = CodeExecutionPolicy(settings: settings.codeExecution).evaluate(requestedRun)
+        let policyDecision = CodeExecutionPolicy(
+            settings: settings.codeExecution,
+            localExecution: settings.localExecution
+        ).evaluate(requestedRun)
         let allowedRun: CodeExecutionRequest
         switch policyDecision {
         case let .allowed(timeoutSeconds, workingDirectoryPath, maxCapturedOutputBytes):
@@ -8094,7 +8345,10 @@ final class AppStore: ObservableObject {
             workingDirectoryPath: session.workingDirectoryPath,
             timeoutSeconds: terminalTimeoutSeconds
         )
-        let policyDecision = CodeExecutionPolicy(settings: settings.codeExecution).evaluate(requestedRun)
+        let policyDecision = CodeExecutionPolicy(
+            settings: settings.codeExecution,
+            localExecution: settings.localExecution
+        ).evaluate(requestedRun)
         let allowedRun: CodeExecutionRequest
         switch policyDecision {
         case let .allowed(timeoutSeconds, workingDirectoryPath, maxCapturedOutputBytes):
@@ -8466,8 +8720,9 @@ final class AppStore: ObservableObject {
             setImageEditMask(data: data, fileName: url.lastPathComponent, contentType: contentType)
             errorMessage = nil
         } catch {
-            imageGenerationError = error.localizedDescription
-            errorMessage = error.localizedDescription
+            let message = providerErrorMessage(for: error)
+            imageGenerationError = message
+            errorMessage = message
         }
     }
 
@@ -8530,8 +8785,9 @@ final class AppStore: ObservableObject {
             generatedImages.insert(contentsOf: records, at: 0)
             sortGeneratedImages()
         } catch {
-            imageGenerationError = error.localizedDescription
-            errorMessage = error.localizedDescription
+            let message = providerErrorMessage(for: error)
+            imageGenerationError = message
+            errorMessage = message
         }
 
         isGeneratingImage = false
@@ -8606,8 +8862,9 @@ final class AppStore: ObservableObject {
             sortGeneratedImages()
             clearImageEditMask()
         } catch {
-            imageGenerationError = error.localizedDescription
-            errorMessage = error.localizedDescription
+            let message = providerErrorMessage(for: error)
+            imageGenerationError = message
+            errorMessage = message
         }
 
         isEditingImage = false
@@ -8781,7 +9038,7 @@ final class AppStore: ObservableObject {
                 )
             }
         } catch {
-            let message = error.localizedDescription
+            let message = providerErrorMessage(for: error)
             playgroundError = message
             if isPlaygroundComparisonEnabled {
                 playgroundComparisonError = message
@@ -8806,7 +9063,10 @@ final class AppStore: ObservableObject {
                 appendChunk(chunk)
             }
         } catch {
-            let message = error.localizedDescription
+            let message = ProviderErrorPresentation.presentation(
+                for: error,
+                provider: provider.configuration
+            ).message
             assignError(message)
             errorMessage = message
         }
@@ -9551,7 +9811,7 @@ final class AppStore: ObservableObject {
     }
 
     func cancelAssistantBranch(messageID: UUID) {
-        guard let threadIndex = currentThreadIndex(),
+        guard let threadIndex = threadIndex(containing: messageID),
               let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == messageID }),
               threads[threadIndex].messages[messageIndex].role == .assistant,
               threads[threadIndex].messages[messageIndex].isStreaming else {
@@ -9562,19 +9822,24 @@ final class AppStore: ObservableObject {
         finishAssistantMessage(id: messageID, error: nil)
     }
 
-    func send(_ prompt: String) async {
+    func clearComposerTransientState() {
+        composerInlineMessage = nil
+    }
+
+    @discardableResult
+    func send(_ prompt: String) async -> Bool {
         guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
-            errorMessage = ProviderError.emptyPrompt.localizedDescription
-            return
+            setComposerError(ProviderError.emptyPrompt.localizedDescription)
+            return false
         }
         guard canChat else {
-            errorMessage = ProviderError.unsupportedChat(activeProvider.name).localizedDescription
-            return
+            setComposerError(ProviderError.unsupportedChat(activeProvider.name).localizedDescription)
+            return false
         }
         let modelIDs = selectedModelIDs
         guard let primaryModelID = modelIDs.first else {
-            errorMessage = ProviderError.noModelSelected.localizedDescription
-            return
+            setComposerError(ProviderError.noModelSelected.localizedDescription)
+            return false
         }
 
         if selectedThreadID == nil {
@@ -9582,16 +9847,19 @@ final class AppStore: ObservableObject {
         }
 
         guard let index = currentThreadIndex() else {
-            return
+            return false
         }
 
         isSending = true
         isCancellingSend = false
         errorMessage = nil
+        composerInlineMessage = nil
         let sendID = UUID()
         activeSendID = sendID
         cancelledSendIDs.remove(sendID)
+        let targetThreadID = threads[index].id
         var assistantMessageID: UUID?
+        var didAppendMessages = false
 
         do {
             let provider = try makeActiveProvider()
@@ -9623,7 +9891,8 @@ final class AppStore: ObservableObject {
             threads[index].modelIDs = modelIDs
             threads[index].title = title(for: prompt)
             threads[index].updatedAt = Date()
-            await persistCurrentThread()
+            didAppendMessages = true
+            await persistThread(id: targetThreadID)
 
             var branchTasks: [(messageID: UUID, task: Task<Void, Never>)] = []
             for assistantMessage in assistantMessages {
@@ -9633,6 +9902,7 @@ final class AppStore: ObservableObject {
                     }
                     await self.streamAssistantBranch(
                         assistantMessage: assistantMessage,
+                        threadID: targetThreadID,
                         provider: provider,
                         fallbackModelID: primaryModelID,
                         sendID: sendID
@@ -9646,17 +9916,18 @@ final class AppStore: ObservableObject {
                 await branchTask.task.value
                 activeAssistantBranchTasks[branchTask.messageID] = nil
             }
-            if let index = currentThreadIndex() {
+            if let index = threadIndex(id: targetThreadID) {
                 orderAssistantBranches(assistantMessages.map(\.id), in: index)
             }
         } catch {
+            let message = providerErrorMessage(for: error)
             if let assistantMessageID {
-                finishAssistantMessage(id: assistantMessageID, error: error.localizedDescription)
+                finishAssistantMessage(id: assistantMessageID, error: message)
             }
             if isWebSearchEnabledForNextPrompt {
-                webSearchError = error.localizedDescription
+                webSearchError = message
             }
-            errorMessage = error.localizedDescription
+            setComposerError(message)
         }
 
         isSending = false
@@ -9665,22 +9936,29 @@ final class AppStore: ObservableObject {
             activeSendID = nil
         }
         cancelledSendIDs.remove(sendID)
-        await persistCurrentThread()
+        await persistThread(id: targetThreadID)
+        return didAppendMessages
+    }
+
+    private func setComposerError(_ message: String) {
+        composerInlineMessage = message
+        errorMessage = message
     }
 
     private func streamAssistantBranch(
         assistantMessage: ChatMessage,
+        threadID: UUID,
         provider: any ChatProvider,
         fallbackModelID: String,
         sendID: UUID
     ) async {
-        guard let threadIndex = currentThreadIndex() else {
+        guard let sourceThreadIndex = threadIndex(id: threadID) else {
             return
         }
 
         do {
             var providerMessages = providerMessages(
-                for: threads[threadIndex],
+                for: threads[sourceThreadIndex],
                 throughMessageID: assistantMessage.id,
                 excludingMessageID: assistantMessage.id
             )
@@ -9704,7 +9982,7 @@ final class AppStore: ObservableObject {
                         wasCancelled = true
                         break
                     }
-                    guard let threadIndex = currentThreadIndex(),
+                    guard let threadIndex = threadIndex(id: threadID),
                           let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == assistantMessage.id }) else {
                         continue
                     }
@@ -9725,7 +10003,10 @@ final class AppStore: ObservableObject {
         } catch is CancellationError {
             finishAssistantMessage(id: assistantMessage.id, error: nil)
         } catch {
-            finishAssistantMessage(id: assistantMessage.id, error: error.localizedDescription)
+            finishAssistantMessage(id: assistantMessage.id, error: ProviderErrorPresentation.presentation(
+                for: error,
+                provider: provider.configuration
+            ).message)
         }
         cancelledAssistantBranchIDs.remove(assistantMessage.id)
     }
@@ -9739,7 +10020,7 @@ final class AppStore: ObservableObject {
     }
 
     private func finishAssistantMessage(id: UUID, error: String?) {
-        guard let threadIndex = currentThreadIndex(),
+        guard let threadIndex = threadIndex(containing: id),
               let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == id }) else {
             return
         }
@@ -9791,11 +10072,22 @@ final class AppStore: ObservableObject {
         }
     }
 
+    private func persistThread(id: UUID) async {
+        guard let index = threadIndex(id: id) else {
+            return
+        }
+        await persistThread(at: index)
+    }
+
     private func currentThreadIndex() -> Array<ChatThread>.Index? {
         guard let selectedThreadID else {
             return nil
         }
         return threads.firstIndex { $0.id == selectedThreadID }
+    }
+
+    private func threadIndex(id: UUID) -> Array<ChatThread>.Index? {
+        threads.firstIndex { $0.id == id }
     }
 
     private func threadIndex(containing messageID: UUID) -> Array<ChatThread>.Index? {
@@ -9840,7 +10132,7 @@ final class AppStore: ObservableObject {
         }
         let filteredMessages = try await applyActiveFilterFunctions(methodName: "outlet", to: outletMessages)
         guard let filteredAssistant = filteredMessages.reversed().first(where: { $0.role == ChatRole.assistant.rawValue }),
-              let threadIndex = currentThreadIndex(),
+              let threadIndex = threadIndex(containing: assistantMessageID),
               let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == assistantMessageID }) else {
             return
         }
@@ -9849,7 +10141,7 @@ final class AppStore: ObservableObject {
     }
 
     private func providerMessagesIncludingAssistant(assistantMessageID: UUID) -> [ProviderChatMessage]? {
-        guard let threadIndex = currentThreadIndex(),
+        guard let threadIndex = threadIndex(containing: assistantMessageID),
               let assistantIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == assistantMessageID }) else {
             return nil
         }
@@ -9870,6 +10162,7 @@ final class AppStore: ObservableObject {
         providerMessages: [ProviderChatMessage],
         assistantMessageID: UUID
     ) async throws {
+        let workingDirectoryPath = try localExecutionWorkingDirectoryOrThrow()
         let input = pipeInvocationInput(modelID: modelID, messages: providerMessages)
         let run = await functionExecutor.invoke(
             LocalFunctionInvocationRequest(
@@ -9877,7 +10170,9 @@ final class AppStore: ObservableObject {
                 methodName: "pipe",
                 input: input,
                 inputBody: jsonBodyString(for: input),
-                timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1))
+                timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1)),
+                workingDirectoryPath: workingDirectoryPath,
+                maxCapturedOutputBytes: settings.codeExecution.maxCapturedOutputBytes
             )
         )
         try await persistFunctionRun(run)
@@ -9888,7 +10183,7 @@ final class AppStore: ObservableObject {
     }
 
     private func appendAssistantContent(_ content: String, to assistantMessageID: UUID) {
-        guard let threadIndex = currentThreadIndex(),
+        guard let threadIndex = threadIndex(containing: assistantMessageID),
               let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == assistantMessageID }) else {
             return
         }
@@ -9907,6 +10202,7 @@ final class AppStore: ObservableObject {
         }
 
         for function in filters {
+            let workingDirectoryPath = try localExecutionWorkingDirectoryOrThrow()
             let input = filterInvocationInput(for: filteredMessages)
             let run = await functionExecutor.invoke(
                 LocalFunctionInvocationRequest(
@@ -9914,7 +10210,9 @@ final class AppStore: ObservableObject {
                     methodName: methodName,
                     input: input,
                     inputBody: jsonBodyString(for: input),
-                    timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1))
+                    timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1)),
+                    workingDirectoryPath: workingDirectoryPath,
+                    maxCapturedOutputBytes: settings.codeExecution.maxCapturedOutputBytes
                 )
             )
             try await persistFunctionRun(run)
@@ -10170,6 +10468,11 @@ final class AppStore: ObservableObject {
         guard requireToolsFeatureEnabled() else {
             return nil
         }
+        guard let workingDirectoryPath = localExecutionWorkingDirectory(setError: { reason in
+            toolExecutionError = reason
+        }) else {
+            return nil
+        }
 
         let tool = AppTool(
             name: name,
@@ -10181,7 +10484,9 @@ final class AppStore: ObservableObject {
                 functionName: "__native_valves_schema",
                 arguments: .object([:]),
                 argumentsBody: "{}",
-                timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1))
+                timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1)),
+                workingDirectoryPath: workingDirectoryPath,
+                maxCapturedOutputBytes: settings.codeExecution.maxCapturedOutputBytes
             )
         )
         guard run.status == .succeeded,
@@ -10218,6 +10523,11 @@ final class AppStore: ObservableObject {
         guard requireFunctionsFeatureEnabled() else {
             return nil
         }
+        guard let workingDirectoryPath = localExecutionWorkingDirectory(setError: { reason in
+            functionExecutionError = reason
+        }) else {
+            return nil
+        }
 
         let function = AppFunction(
             name: name,
@@ -10230,7 +10540,9 @@ final class AppStore: ObservableObject {
                 methodName: "__native_valves_schema",
                 input: .object([:]),
                 inputBody: "{}",
-                timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1))
+                timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1)),
+                workingDirectoryPath: workingDirectoryPath,
+                maxCapturedOutputBytes: settings.codeExecution.maxCapturedOutputBytes
             )
         )
         guard run.status == .succeeded,
@@ -10463,6 +10775,31 @@ final class AppStore: ObservableObject {
         }
 
         return true
+    }
+
+    private func localExecutionWorkingDirectory(
+        requestedWorkingDirectoryPath: String? = nil,
+        setError: (String) -> Void
+    ) -> String? {
+        switch settings.localExecution.evaluate(workingDirectoryPath: requestedWorkingDirectoryPath) {
+        case .allowed(let workingDirectoryPath):
+            return workingDirectoryPath
+        case .blocked(let reason):
+            setError(reason)
+            errorMessage = reason
+            return nil
+        }
+    }
+
+    private func localExecutionWorkingDirectoryOrThrow(
+        requestedWorkingDirectoryPath: String? = nil
+    ) throws -> String {
+        switch settings.localExecution.evaluate(workingDirectoryPath: requestedWorkingDirectoryPath) {
+        case .allowed(let workingDirectoryPath):
+            return workingDirectoryPath
+        case .blocked(let reason):
+            throw LocalExecutionBlockedError(reason: reason)
+        }
     }
 
     private func requireToolServerWritePermission() -> Bool {
@@ -10800,6 +11137,39 @@ final class AppStore: ObservableObject {
         return true
     }
 
+    private func providerErrorMessage(for error: Error) -> String {
+        ProviderErrorPresentation.presentation(for: error, provider: activeProvider).message
+    }
+
+    private func appendRecoveryNotice(_ notice: String) {
+        if let recoveryNotice, !recoveryNotice.isEmpty {
+            self.recoveryNotice = "\(recoveryNotice)\n\(notice)"
+        } else {
+            recoveryNotice = notice
+        }
+    }
+
+    private func verifyActiveProviderSecretIfNeeded() async {
+        let provider = activeProvider
+        guard provider.kind == .openAICompatible else {
+            return
+        }
+
+        guard let secretID = provider.apiKeySecretID else {
+            appendRecoveryNotice("\(provider.name) needs an API key. Add it in Settings; it will be stored in Keychain.")
+            return
+        }
+
+        do {
+            let secret = try await secretStore.readSecret(id: secretID)
+            if secret?.isEmpty != false {
+                appendRecoveryNotice("\(provider.name) needs an API key. Add it in Settings; it will be stored in Keychain.")
+            }
+        } catch {
+            appendRecoveryNotice("Keychain could not read the API key for \(provider.name). Re-enter it in Settings.")
+        }
+    }
+
     private func makeActiveProvider() throws -> any ChatProvider {
         if let providerOverride {
             return providerOverride
@@ -10975,7 +11345,40 @@ final class AppStore: ObservableObject {
         return environment
     }
 
+    private func currentWorkspaceBackup() async throws -> WorkspaceBackup {
+        workspaceBackupService.backup(
+            settings: settings,
+            threads: threads,
+            folders: folders,
+            files: files,
+            prompts: prompts,
+            notes: notes,
+            tools: tools,
+            toolRuns: toolRuns,
+            toolServers: toolServers,
+            toolServerRuns: toolServerRuns,
+            functions: functions,
+            functionRuns: functionRuns,
+            skills: skills,
+            feedbacks: feedbacks,
+            adminDirectory: AdminDirectorySnapshot(users: adminUsers, groups: adminGroups),
+            channels: channels,
+            automations: automations,
+            automationRuns: automationRuns,
+            calendar: CalendarSnapshot(calendars: calendars, events: calendarEvents),
+            playgroundHistory: playgroundHistory,
+            generatedImages: generatedImages,
+            codeExecutionRuns: codeExecutionRuns,
+            terminalSessions: terminalSessions,
+            terminalCommands: terminalCommands,
+            audioHistory: audioHistory,
+            auditEvents: auditEvents,
+            knowledge: try await knowledgeService.loadSnapshot()
+        )
+    }
+
     private func replaceWorkspace(with backup: WorkspaceBackup) async throws {
+        try automaticWorkspaceBackupService.saveSafetyBackup(try await currentWorkspaceBackup())
         try await deletePersistedWorkspaceRecords()
 
         settings = backup.settings
@@ -11303,13 +11706,18 @@ final class AppStore: ObservableObject {
     }
 
     private func manifoldPipeModels(for function: AppFunction) async -> [ProviderModel] {
+        guard let workingDirectoryPath = try? localExecutionWorkingDirectoryOrThrow() else {
+            return []
+        }
         let run = await functionExecutor.invoke(
             LocalFunctionInvocationRequest(
                 function: function,
                 methodName: "pipes",
                 input: .object([:]),
                 inputBody: "{}",
-                timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1))
+                timeoutSeconds: min(max(codeExecutionTimeoutSeconds, 0.1), max(settings.codeExecution.maxTimeoutSeconds, 0.1)),
+                workingDirectoryPath: workingDirectoryPath,
+                maxCapturedOutputBytes: settings.codeExecution.maxCapturedOutputBytes
             )
         )
         guard run.status == .succeeded else {
@@ -11779,6 +12187,33 @@ final class AppStore: ObservableObject {
             return lhs.updatedAt > rhs.updatedAt
         }
         refreshChatTranscriptSearchResults()
+    }
+
+    @discardableResult
+    private func normalizeStaleStreamingMessages() -> Int {
+        var recoveredCount = 0
+        for threadIndex in threads.indices {
+            var didUpdateThread = false
+            for messageIndex in threads[threadIndex].messages.indices {
+                guard threads[threadIndex].messages[messageIndex].isStreaming else {
+                    continue
+                }
+                threads[threadIndex].messages[messageIndex].isStreaming = false
+                threads[threadIndex].messages[messageIndex].error = "Generation was interrupted before the app closed. Retry this response when ready."
+                if let metrics = threads[threadIndex].messages[messageIndex].generationMetrics,
+                   metrics.completedAt == nil {
+                    threads[threadIndex].messages[messageIndex].generationMetrics = metrics.completed()
+                }
+                threads[threadIndex].messages[messageIndex].updatedAt = Date()
+                didUpdateThread = true
+                recoveredCount += 1
+            }
+
+            if didUpdateThread {
+                threads[threadIndex].updatedAt = Date()
+            }
+        }
+        return recoveredCount
     }
 
     private func refreshChatTranscriptSearchResults() {

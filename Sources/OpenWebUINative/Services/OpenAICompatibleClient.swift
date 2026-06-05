@@ -44,9 +44,12 @@ struct OpenAICompatibleClient: ChatProvider {
     func healthCheck() async -> ProviderStatus {
         do {
             let models = try await listModels()
+            guard !models.isEmpty else {
+                throw ProviderError.noModelsReturned(configuration.name)
+            }
             return .available("\(configuration.name) connected (\(models.count) models)")
         } catch {
-            return .unavailable(error.localizedDescription)
+            return .unavailable(ProviderErrorPresentation.presentation(for: error, provider: configuration).message)
         }
     }
 

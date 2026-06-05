@@ -8,7 +8,8 @@ final class CodeExecutionPolicyTests: XCTestCase {
                 allowedLanguages: [.shell],
                 allowedWorkingDirectoryRoots: ["/tmp"],
                 maxTimeoutSeconds: 5
-            )
+            ),
+            localExecution: .enabledForTests(sandboxRootPath: "/tmp")
         )
 
         let decision = policy.evaluate(
@@ -36,7 +37,8 @@ final class CodeExecutionPolicyTests: XCTestCase {
                 allowedLanguages: [.python],
                 allowedWorkingDirectoryRoots: ["/tmp"],
                 maxTimeoutSeconds: 5
-            )
+            ),
+            localExecution: .enabledForTests(sandboxRootPath: "/tmp")
         )
 
         let decision = policy.evaluate(
@@ -57,7 +59,8 @@ final class CodeExecutionPolicyTests: XCTestCase {
                 allowedLanguages: [.shell],
                 allowedWorkingDirectoryRoots: ["/tmp/safe"],
                 maxTimeoutSeconds: 5
-            )
+            ),
+            localExecution: .enabledForTests(sandboxRootPath: "/private")
         )
 
         let decision = policy.evaluate(
@@ -78,7 +81,8 @@ final class CodeExecutionPolicyTests: XCTestCase {
                 allowedLanguages: [.shell],
                 allowedWorkingDirectoryRoots: ["/tmp/safe"],
                 maxTimeoutSeconds: 5
-            )
+            ),
+            localExecution: .enabledForTests(sandboxRootPath: "/tmp")
         )
 
         let decision = policy.evaluate(
@@ -99,7 +103,8 @@ final class CodeExecutionPolicyTests: XCTestCase {
                 allowedLanguages: [.shell],
                 allowedWorkingDirectoryRoots: ["/tmp/safe"],
                 maxTimeoutSeconds: 5
-            )
+            ),
+            localExecution: .enabledForTests(sandboxRootPath: "/tmp")
         )
 
         let decision = policy.evaluate(
@@ -121,7 +126,8 @@ final class CodeExecutionPolicyTests: XCTestCase {
                 allowedWorkingDirectoryRoots: ["/tmp"],
                 deniedExecutableNames: ["rm"],
                 maxTimeoutSeconds: 5
-            )
+            ),
+            localExecution: .enabledForTests(sandboxRootPath: "/tmp")
         )
 
         let decision = policy.evaluate(
@@ -143,7 +149,8 @@ final class CodeExecutionPolicyTests: XCTestCase {
                 allowedWorkingDirectoryRoots: ["/tmp"],
                 allowedExecutableNames: ["echo", "pwd"],
                 maxTimeoutSeconds: 5
-            )
+            ),
+            localExecution: .enabledForTests(sandboxRootPath: "/tmp")
         )
 
         let decision = policy.evaluate(
@@ -166,7 +173,8 @@ final class CodeExecutionPolicyTests: XCTestCase {
                 allowedExecutableNames: ["echo", "pwd"],
                 deniedExecutableNames: ["rm"],
                 maxTimeoutSeconds: 5
-            )
+            ),
+            localExecution: .enabledForTests(sandboxRootPath: "/tmp")
         )
 
         let decision = policy.evaluate(
@@ -183,6 +191,103 @@ final class CodeExecutionPolicyTests: XCTestCase {
             XCTAssertEqual(timeoutSeconds, 1)
             XCTAssertEqual(workingDirectoryPath, "/tmp")
             XCTAssertEqual(maxCapturedOutputBytes, 1_048_576)
+        case let .blocked(reason):
+            XCTFail("Expected policy to allow execution, but blocked: \(reason)")
+        }
+    }
+
+    func testPolicyBlocksWhenLocalExecutionIsDisabled() {
+        let policy = CodeExecutionPolicy(
+            settings: CodeExecutionSettings(
+                allowedLanguages: [.shell],
+                allowedWorkingDirectoryRoots: ["/tmp"]
+            ),
+            localExecution: LocalExecutionSettings(
+                isEnabled: false,
+                hasAcceptedRiskWarning: true,
+                sandboxRootPath: "/tmp"
+            )
+        )
+
+        let decision = policy.evaluate(
+            CodeExecutionRequest(
+                language: .shell,
+                code: "pwd",
+                workingDirectoryPath: "/tmp",
+                timeoutSeconds: 1
+            )
+        )
+
+        XCTAssertEqual(decision, .blocked(reason: LocalExecutionSettings.disabledMessage))
+    }
+
+    func testPolicyBlocksWhenRiskWarningHasNotBeenAccepted() {
+        let policy = CodeExecutionPolicy(
+            settings: CodeExecutionSettings(
+                allowedLanguages: [.shell],
+                allowedWorkingDirectoryRoots: ["/tmp"]
+            ),
+            localExecution: LocalExecutionSettings(
+                isEnabled: true,
+                hasAcceptedRiskWarning: false,
+                sandboxRootPath: "/tmp"
+            )
+        )
+
+        let decision = policy.evaluate(
+            CodeExecutionRequest(
+                language: .shell,
+                code: "pwd",
+                workingDirectoryPath: "/tmp",
+                timeoutSeconds: 1
+            )
+        )
+
+        XCTAssertEqual(decision, .blocked(reason: LocalExecutionSettings.riskWarningRequiredMessage))
+    }
+
+    func testPolicyBlocksWorkingDirectoryOutsideLocalExecutionSandbox() {
+        let policy = CodeExecutionPolicy(
+            settings: CodeExecutionSettings(
+                allowedLanguages: [.shell],
+                allowedWorkingDirectoryRoots: ["/tmp/sandbox"]
+            ),
+            localExecution: .enabledForTests(sandboxRootPath: "/tmp/sandbox")
+        )
+
+        let decision = policy.evaluate(
+            CodeExecutionRequest(
+                language: .shell,
+                code: "pwd",
+                workingDirectoryPath: "/tmp/outside",
+                timeoutSeconds: 1
+            )
+        )
+
+        XCTAssertEqual(decision, .blocked(reason: LocalExecutionSettings.outsideSandboxMessage))
+    }
+
+    func testPolicyDefaultsMissingWorkingDirectoryToSandboxRootWhenAllowed() {
+        let policy = CodeExecutionPolicy(
+            settings: CodeExecutionSettings(
+                allowedLanguages: [.shell],
+                allowedWorkingDirectoryRoots: ["/tmp/sandbox"]
+            ),
+            localExecution: .enabledForTests(sandboxRootPath: "/tmp/sandbox")
+        )
+
+        let decision = policy.evaluate(
+            CodeExecutionRequest(
+                language: .shell,
+                code: "pwd",
+                workingDirectoryPath: nil,
+                timeoutSeconds: 1
+            )
+        )
+
+        switch decision {
+        case let .allowed(_, workingDirectoryPath, _):
+            XCTAssertEqual(workingDirectoryPath, "/tmp/sandbox")
         case let .blocked(reason):
             XCTFail("Expected policy to allow execution, but blocked: \(reason)")
         }

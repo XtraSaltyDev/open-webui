@@ -374,6 +374,112 @@ final class AppStoreProviderSettingsTests: XCTestCase {
         XCTAssertEqual(store.selectedModelID, "custom-vector-model")
         XCTAssertEqual(store.selectedEmbeddingModelID, "custom-vector-model")
     }
+
+    func testCompleteFirstRunSetupPersistsCompletedFlag() async throws {
+        let fixture = try ProviderSettingsFixture()
+        let store = fixture.makeStore(secretStore: InMemorySecretStore())
+        await store.load()
+
+        await store.completeFirstRunSetup()
+
+        XCTAssertTrue(store.settings.hasCompletedFirstRunSetup)
+        let savedSettings = try await fixture.settingsStore.load()
+        XCTAssertTrue(savedSettings.hasCompletedFirstRunSetup)
+    }
+
+    func testSkipFirstRunSetupLeavesSafeDefaultsAndPersistsCompletedFlag() async throws {
+        let fixture = try ProviderSettingsFixture()
+        let store = fixture.makeStore(secretStore: InMemorySecretStore())
+        store.settings.localExecution = LocalExecutionSettings(
+            isEnabled: true,
+            hasAcceptedRiskWarning: true,
+            sandboxRootPath: "/tmp/custom-sandbox"
+        )
+
+        await store.skipFirstRunSetup()
+
+        XCTAssertTrue(store.settings.hasCompletedFirstRunSetup)
+        XCTAssertEqual(store.settings.activeProviderID, ProviderConfiguration.defaultOllamaID)
+        XCTAssertEqual(store.settings.activeProvider.kind, .ollama)
+        XCTAssertFalse(store.settings.localExecution.isEnabled)
+        XCTAssertFalse(store.settings.localExecution.hasAcceptedRiskWarning)
+
+        let savedSettings = try await fixture.settingsStore.load()
+        XCTAssertTrue(savedSettings.hasCompletedFirstRunSetup)
+        XCTAssertFalse(savedSettings.localExecution.isEnabled)
+    }
+
+    func testRefreshModelsExplainsWhenProviderReturnsNoModels() async throws {
+        let fixture = try ProviderSettingsFixture()
+        let provider = HealthCheckProvider(status: .available("Gateway reachable"), models: [])
+        let store = fixture.makeStore(secretStore: InMemorySecretStore(), provider: provider)
+
+        await store.refreshModels()
+
+        XCTAssertEqual(store.models, [])
+        XCTAssertNil(store.settings.selectedModelID)
+        XCTAssertEqual(
+            store.providerStatus,
+            .unavailable("Gateway responded, but returned no models. Check the provider account, base URL, or model permissions.")
+        )
+    }
+
+    func testRefreshModelsSurfacesRecoveryNoticeWhenSelectedModelDisappears() async throws {
+        let fixture = try ProviderSettingsFixture()
+        let settings = AppSettings(
+            selectedModelID: "stale-model",
+            selectedModelIDs: ["stale-model"],
+            embeddingModelID: "stale-embed"
+        )
+        try await fixture.settingsStore.save(settings)
+        let provider = HealthCheckProvider(
+            status: .available("Gateway reachable"),
+            models: [
+                ProviderModel(
+                    id: "fresh-model",
+                    name: "Fresh Model",
+                    provider: .ollama,
+                    providerID: ProviderConfiguration.defaultOllamaID
+                )
+            ]
+        )
+        let store = fixture.makeStore(secretStore: InMemorySecretStore(), provider: provider)
+        store.settings = try await fixture.settingsStore.load()
+
+        await store.refreshModels()
+
+        XCTAssertEqual(store.settings.selectedModelID, "fresh-model")
+        XCTAssertEqual(store.settings.selectedModelIDs, ["fresh-model"])
+        XCTAssertNil(store.settings.embeddingModelID)
+        XCTAssertEqual(
+            store.recoveryNotice,
+            "Recovered provider defaults: stale-model is no longer available, so fresh-model is selected."
+        )
+    }
+
+    func testMissingOpenAICompatibleKeychainSecretIsHandledAsProviderStatus() async throws {
+        let fixture = try ProviderSettingsFixture()
+        let providerID = UUID()
+        let provider = ProviderConfiguration(
+            id: providerID,
+            name: "Gateway",
+            kind: .openAICompatible,
+            baseURL: "https://gateway.example/v1",
+            apiKeySecretID: "missing-secret"
+        )
+        try await fixture.settingsStore.save(
+            AppSettings(providers: [provider], activeProviderID: providerID)
+        )
+        let store = fixture.makeStore(secretStore: InMemorySecretStore())
+        store.settings = try await fixture.settingsStore.load()
+
+        await store.checkActiveProviderHealth()
+
+        XCTAssertEqual(
+            store.providerStatus,
+            .unavailable("Gateway needs an API key. Add it in Settings; it will be stored in Keychain.")
+        )
+    }
 }
 
 private struct ProviderSettingsFixture {

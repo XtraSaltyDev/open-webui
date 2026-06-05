@@ -1,7 +1,22 @@
+import Darwin
 import Foundation
 
 protocol ToolServerToolDiscovering: Sendable {
-    func discoverTools(for server: AppToolServer) async -> ToolServerToolDiscoveryResult
+    func discoverTools(
+        for server: AppToolServer,
+        workingDirectoryPath: String?,
+        maxCapturedOutputBytes: Int?
+    ) async -> ToolServerToolDiscoveryResult
+}
+
+extension ToolServerToolDiscovering {
+    func discoverTools(for server: AppToolServer) async -> ToolServerToolDiscoveryResult {
+        await discoverTools(
+            for: server,
+            workingDirectoryPath: nil,
+            maxCapturedOutputBytes: nil
+        )
+    }
 }
 
 protocol ToolServerToolCalling: Sendable {
@@ -30,10 +45,18 @@ struct ToolServerMCPDiscoveryService: ToolServerToolDiscovering, ToolServerToolC
         self.stdioTimeoutSeconds = stdioTimeoutSeconds
     }
 
-    func discoverTools(for server: AppToolServer) async -> ToolServerToolDiscoveryResult {
+    func discoverTools(
+        for server: AppToolServer,
+        workingDirectoryPath: String? = nil,
+        maxCapturedOutputBytes: Int? = nil
+    ) async -> ToolServerToolDiscoveryResult {
         switch server.kind {
         case .stdio:
-            return discoverStdioTools(for: server)
+            return discoverStdioTools(
+                for: server,
+                workingDirectoryPath: workingDirectoryPath,
+                maxCapturedOutputBytes: maxCapturedOutputBytes
+            )
         case .http:
             return await discoverHTTPTools(for: server)
         }
@@ -87,9 +110,18 @@ struct ToolServerMCPDiscoveryService: ToolServerToolDiscovering, ToolServerToolC
         }
     }
 
-    private func discoverStdioTools(for server: AppToolServer) -> ToolServerToolDiscoveryResult {
+    private func discoverStdioTools(
+        for server: AppToolServer,
+        workingDirectoryPath: String?,
+        maxCapturedOutputBytes: Int?
+    ) -> ToolServerToolDiscoveryResult {
         do {
-            let session = try StdioMCPProcessSession(server: server, timeoutSeconds: stdioTimeoutSeconds)
+            let session = try StdioMCPProcessSession(
+                server: server,
+                timeoutSeconds: stdioTimeoutSeconds,
+                workingDirectoryPath: workingDirectoryPath,
+                maxCapturedOutputBytes: maxCapturedOutputBytes ?? CodeExecutionSettings().maxCapturedOutputBytes
+            )
             defer {
                 session.close()
             }
@@ -216,7 +248,12 @@ struct ToolServerMCPDiscoveryService: ToolServerToolDiscovering, ToolServerToolC
 
     private func callStdioTool(_ request: ToolServerToolCallRequest, startedAt: Date) -> AppToolServerRun {
         do {
-            let session = try StdioMCPProcessSession(server: request.server, timeoutSeconds: stdioTimeoutSeconds)
+            let session = try StdioMCPProcessSession(
+                server: request.server,
+                timeoutSeconds: stdioTimeoutSeconds,
+                workingDirectoryPath: request.workingDirectoryPath,
+                maxCapturedOutputBytes: request.maxCapturedOutputBytes ?? CodeExecutionSettings().maxCapturedOutputBytes
+            )
             defer {
                 session.close()
             }
@@ -401,9 +438,15 @@ private final class StdioMCPProcessSession {
     private let process: Process
     private let input: Pipe
     private let outputReader: StdioLineReader
+    private let errorDrainer: StdioPipeDrainer
     private let timeoutSeconds: TimeInterval
 
-    init(server: AppToolServer, timeoutSeconds: TimeInterval) throws {
+    init(
+        server: AppToolServer,
+        timeoutSeconds: TimeInterval,
+        workingDirectoryPath: String?,
+        maxCapturedOutputBytes: Int
+    ) throws {
         guard let command = server.command?.trimmingCharacters(in: .whitespacesAndNewlines),
               !command.isEmpty else {
             throw ToolServerMCPDiscoveryError.server("Missing command.")
@@ -422,6 +465,10 @@ private final class StdioMCPProcessSession {
             process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
             process.arguments = [command] + server.arguments
         }
+        if let workingDirectoryPath = workingDirectoryPath?.trimmingCharacters(in: .whitespacesAndNewlines),
+           !workingDirectoryPath.isEmpty {
+            process.currentDirectoryURL = URL(fileURLWithPath: workingDirectoryPath, isDirectory: true).standardizedFileURL
+        }
         process.standardInput = input
         process.standardOutput = output
         process.standardError = error
@@ -430,10 +477,15 @@ private final class StdioMCPProcessSession {
         }
 
         outputReader = StdioLineReader(handle: output.fileHandleForReading)
+        errorDrainer = StdioPipeDrainer(
+            handle: error.fileHandleForReading,
+            maxCapturedOutputBytes: maxCapturedOutputBytes
+        )
         do {
             try process.run()
         } catch {
             outputReader.close()
+            errorDrainer.close()
             throw ToolServerMCPDiscoveryError.server(error.localizedDescription)
         }
     }
@@ -450,11 +502,49 @@ private final class StdioMCPProcessSession {
 
     func close() {
         outputReader.close()
+        errorDrainer.close()
         try? input.fileHandleForWriting.close()
         if process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
+            terminate()
         }
+    }
+
+    private func terminate() {
+        process.terminate()
+        let deadline = Date().addingTimeInterval(0.3)
+        while process.isRunning, Date() < deadline {
+            Thread.sleep(forTimeInterval: 0.02)
+        }
+        if process.isRunning {
+            kill(process.processIdentifier, SIGKILL)
+        }
+        process.waitUntilExit()
+    }
+}
+
+private final class StdioPipeDrainer {
+    private let handle: FileHandle
+    private let lock = NSLock()
+    private let maxCapturedOutputBytes: Int
+    private var capturedByteCount = 0
+
+    init(handle: FileHandle, maxCapturedOutputBytes: Int) {
+        self.handle = handle
+        self.maxCapturedOutputBytes = max(maxCapturedOutputBytes, 1)
+        handle.readabilityHandler = { [weak self] readableHandle in
+            let data = readableHandle.availableData
+            guard let self, !data.isEmpty else {
+                return
+            }
+            self.lock.lock()
+            self.capturedByteCount = min(self.maxCapturedOutputBytes, self.capturedByteCount + data.count)
+            self.lock.unlock()
+        }
+    }
+
+    func close() {
+        handle.readabilityHandler = nil
+        try? handle.close()
     }
 }
 

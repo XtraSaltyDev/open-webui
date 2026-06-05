@@ -66,6 +66,7 @@ final class AppStoreAuditLogTests: XCTestCase {
         let fixture = try AuditLogFixture(codeExecutor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.codeInterpreter, isEnabled: true)
         store.codeExecutionInput = "printf audit"
 

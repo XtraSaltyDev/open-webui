@@ -6,19 +6,25 @@ struct LocalFunctionInvocationRequest: Equatable, Sendable {
     var input: JSONValue
     var inputBody: String
     var timeoutSeconds: Double
+    var workingDirectoryPath: String?
+    var maxCapturedOutputBytes: Int?
 
     init(
         function: AppFunction,
         methodName: String,
         input: JSONValue = .object([:]),
         inputBody: String = "{}",
-        timeoutSeconds: Double = 10
+        timeoutSeconds: Double = 10,
+        workingDirectoryPath: String? = nil,
+        maxCapturedOutputBytes: Int? = nil
     ) {
         self.function = function
         self.methodName = methodName
         self.input = input
         self.inputBody = inputBody
         self.timeoutSeconds = timeoutSeconds
+        self.workingDirectoryPath = workingDirectoryPath
+        self.maxCapturedOutputBytes = maxCapturedOutputBytes
     }
 }
 

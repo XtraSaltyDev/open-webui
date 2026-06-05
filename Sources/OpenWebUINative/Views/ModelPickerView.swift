@@ -91,6 +91,14 @@ struct ModelPickerView: View {
                 }
             }
 
+            if let modelEmptyStateMessage = store.modelEmptyStateMessage {
+                Text(modelEmptyStateMessage)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .frame(maxWidth: 240, alignment: .leading)
+            }
+
             Spacer(minLength: 12)
 
             providerStatusView(showText: showStatusText)

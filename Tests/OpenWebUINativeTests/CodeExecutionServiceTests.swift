@@ -53,7 +53,7 @@ final class CodeExecutionServiceTests: XCTestCase {
             )
         )
 
-        XCTAssertEqual(run.status, .failed)
+        XCTAssertEqual(run.status, .succeeded)
         XCTAssertLessThanOrEqual(run.stdout.utf8.count, 64)
         XCTAssertTrue(run.stderr.contains("Output truncated after reaching the 64-byte capture limit."))
     }

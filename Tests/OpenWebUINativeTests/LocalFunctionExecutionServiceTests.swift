@@ -94,6 +94,39 @@ final class LocalFunctionExecutionServiceTests: XCTestCase {
         XCTAssertEqual(schema.objectValue?["type"], .string("object"))
         XCTAssertEqual(schema.objectValue?["properties"]?.objectValue?["limit"]?.objectValue?["default"], .number(3))
     }
+
+    func testPythonFunctionInvocationDrainsLargeStdoutAndStderrWithoutDeadlock() async throws {
+        let service = LocalFunctionExecutionService()
+        let function = AppFunction(
+            name: "Noisy action",
+            kind: .action,
+            content: """
+            import sys
+
+            def action(body):
+                sys.stdout.write("o" * 120000)
+                sys.stderr.write("e" * 120000)
+                return "done"
+            """
+        )
+
+        let run = await service.invoke(
+            LocalFunctionInvocationRequest(
+                function: function,
+                methodName: "action",
+                input: .object(["body": .object([:])]),
+                inputBody: #"{"body":{}}"#,
+                timeoutSeconds: 3,
+                maxCapturedOutputBytes: 300_000
+            )
+        )
+
+        XCTAssertEqual(run.status, .succeeded)
+        XCTAssertEqual(run.exitCode, 0)
+        XCTAssertGreaterThanOrEqual(run.output.utf8.count, 120_000)
+        XCTAssertGreaterThanOrEqual(run.stderr.utf8.count, 120_000)
+        XCTAssertNil(run.errorMessage)
+    }
 }
 
 final class JSONFunctionRunStorageServiceTests: XCTestCase {

@@ -16,11 +16,6 @@ struct LocalFunctionExecutionService: LocalFunctionExecuting {
 
 private func invokeSynchronously(_ request: LocalFunctionInvocationRequest, encoder: JSONEncoder) -> AppFunctionRun {
     let startedAt = Date()
-    let process = Process()
-    let stdoutPipe = Pipe()
-    let stderrPipe = Pipe()
-    let stdinPipe = Pipe()
-    var timedOut = false
 
     guard let inputData = try? encoder.encode(request.input) else {
         return failedFunctionRun(
@@ -33,51 +28,14 @@ private func invokeSynchronously(_ request: LocalFunctionInvocationRequest, enco
         )
     }
 
-    process.executableURL = URL(fileURLWithPath: "/usr/bin/python3")
-    process.arguments = ["-c", pythonInvocationScript(for: request)]
-    process.standardOutput = stdoutPipe
-    process.standardError = stderrPipe
-    process.standardInput = stdinPipe
-
-    do {
-        try process.run()
-        stdinPipe.fileHandleForWriting.write(inputData)
-        try? stdinPipe.fileHandleForWriting.close()
-    } catch {
-        return failedFunctionRun(
-            request,
-            output: "",
-            stderr: error.localizedDescription,
-            status: .failed,
-            exitCode: nil,
-            startedAt: startedAt
-        )
-    }
-
-    let timeout = max(request.timeoutSeconds, 0.1)
-    let deadline = Date().addingTimeInterval(timeout)
-    while process.isRunning {
-        if Date() >= deadline {
-            timedOut = true
-            process.terminate()
-            break
-        }
-        Thread.sleep(forTimeInterval: 0.02)
-    }
-
-    process.waitUntilExit()
-
-    let output = String(data: stdoutPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    let stderr = String(data: stderrPipe.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
-    let status: CodeExecutionStatus
-    let exitCode: Int32?
-    if timedOut {
-        status = .timedOut
-        exitCode = nil
-    } else {
-        exitCode = process.terminationStatus
-        status = process.terminationStatus == 0 ? .succeeded : .failed
-    }
+    let result = BoundedProcessRunner().run(
+        executablePath: "/usr/bin/python3",
+        arguments: ["-c", pythonInvocationScript(for: request)],
+        workingDirectoryPath: request.workingDirectoryPath,
+        stdinData: inputData,
+        timeoutSeconds: request.timeoutSeconds,
+        maxCapturedOutputBytes: request.maxCapturedOutputBytes ?? CodeExecutionSettings().maxCapturedOutputBytes
+    )
 
     return AppFunctionRun(
         functionID: request.function.id,
@@ -85,13 +43,13 @@ private func invokeSynchronously(_ request: LocalFunctionInvocationRequest, enco
         functionKind: request.function.kind,
         methodName: request.methodName,
         inputBody: request.inputBody,
-        output: output,
-        stderr: stderr,
-        status: status,
-        exitCode: exitCode,
-        errorMessage: functionRunErrorMessage(status: status, stderr: stderr),
-        startedAt: startedAt,
-        completedAt: Date()
+        output: result.stdout,
+        stderr: result.stderr,
+        status: result.status,
+        exitCode: result.exitCode,
+        errorMessage: functionRunErrorMessage(status: result.status, stderr: result.stderr),
+        startedAt: result.startedAt,
+        completedAt: result.completedAt
     )
 }
 

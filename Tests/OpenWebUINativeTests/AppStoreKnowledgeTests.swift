@@ -554,7 +554,10 @@ final class AppStoreKnowledgeTests: XCTestCase {
 
         await store.importKnowledgeDocument(from: documentURL, toCollectionID: collectionID)
 
-        XCTAssertEqual(store.errorMessage, "Ollama does not support native embeddings.")
+        XCTAssertEqual(
+            store.errorMessage,
+            "Ollama does not support native embeddings in this app. Choose an OpenAI-compatible provider with embedding models."
+        )
         let snapshot = try await fixture.knowledgeStorage.load()
         XCTAssertTrue(snapshot.documents.isEmpty)
         XCTAssertTrue(snapshot.chunks.isEmpty)
@@ -572,7 +575,10 @@ final class AppStoreKnowledgeTests: XCTestCase {
 
         await store.send("Use #research to answer: which fruit is sweet?")
 
-        XCTAssertEqual(store.errorMessage, "Ollama does not support native embeddings.")
+        XCTAssertEqual(
+            store.errorMessage,
+            "Ollama does not support native embeddings in this app. Choose an OpenAI-compatible provider with embedding models."
+        )
         XCTAssertTrue(store.selectedThread?.messages.isEmpty ?? false)
         let embeddingCallCount = await provider.embeddingCallCount
         XCTAssertEqual(embeddingCallCount, 0)

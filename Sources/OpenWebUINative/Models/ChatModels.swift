@@ -1621,7 +1621,9 @@ struct AppSettings: Codable, Equatable, Sendable {
     var embeddingModelID: String?
     var featureToggles: FeatureToggleSettings
     var webSearch: WebSearchSettings
+    var localExecution: LocalExecutionSettings
     var codeExecution: CodeExecutionSettings
+    var hasCompletedFirstRunSetup: Bool
 
     init(
         ollamaBaseURL: String = "http://localhost:11434",
@@ -1632,7 +1634,9 @@ struct AppSettings: Codable, Equatable, Sendable {
         embeddingModelID: String? = nil,
         featureToggles: FeatureToggleSettings = FeatureToggleSettings(),
         webSearch: WebSearchSettings = WebSearchSettings(),
-        codeExecution: CodeExecutionSettings = CodeExecutionSettings()
+        localExecution: LocalExecutionSettings = LocalExecutionSettings(),
+        codeExecution: CodeExecutionSettings = CodeExecutionSettings(),
+        hasCompletedFirstRunSetup: Bool = false
     ) {
         self.ollamaBaseURL = ollamaBaseURL
         let resolvedProviders = providers ?? [ProviderConfiguration.defaultOllama(baseURL: ollamaBaseURL)]
@@ -1643,7 +1647,9 @@ struct AppSettings: Codable, Equatable, Sendable {
         self.embeddingModelID = embeddingModelID
         self.featureToggles = featureToggles
         self.webSearch = webSearch
+        self.localExecution = localExecution
         self.codeExecution = codeExecution
+        self.hasCompletedFirstRunSetup = hasCompletedFirstRunSetup
     }
 
     var activeProvider: ProviderConfiguration {
@@ -1659,7 +1665,9 @@ struct AppSettings: Codable, Equatable, Sendable {
         case embeddingModelID
         case featureToggles
         case webSearch
+        case localExecution
         case codeExecution
+        case hasCompletedFirstRunSetup
     }
 
     init(from decoder: Decoder) throws {
@@ -1686,7 +1694,10 @@ struct AppSettings: Codable, Equatable, Sendable {
                 forKey: .featureToggles
             ) ?? FeatureToggleSettings(),
             webSearch: try container.decodeIfPresent(WebSearchSettings.self, forKey: .webSearch) ?? WebSearchSettings(),
-            codeExecution: try container.decodeIfPresent(CodeExecutionSettings.self, forKey: .codeExecution) ?? CodeExecutionSettings()
+            localExecution: try container.decodeIfPresent(LocalExecutionSettings.self, forKey: .localExecution)
+                ?? LocalExecutionSettings(),
+            codeExecution: try container.decodeIfPresent(CodeExecutionSettings.self, forKey: .codeExecution) ?? CodeExecutionSettings(),
+            hasCompletedFirstRunSetup: try container.decodeIfPresent(Bool.self, forKey: .hasCompletedFirstRunSetup) ?? false
         )
     }
 }

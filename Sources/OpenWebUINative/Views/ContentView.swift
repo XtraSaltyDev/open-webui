@@ -63,5 +63,51 @@ struct ContentView: View {
         } message: {
             Text(store.errorMessage ?? "")
         }
+        .safeAreaInset(edge: .top) {
+            if let recoveryNotice = store.recoveryNotice {
+                RecoveryNoticeBanner(message: recoveryNotice) {
+                    store.recoveryNotice = nil
+                }
+            }
+        }
+        .sheet(isPresented: Binding(
+            get: { !store.settings.hasCompletedFirstRunSetup },
+            set: { isPresented in
+                if !isPresented {
+                    Task {
+                        await store.skipFirstRunSetup()
+                    }
+                }
+            }
+        )) {
+            FirstRunSetupView(store: store)
+                .frame(width: 560, height: 620)
+        }
+    }
+}
+
+private struct RecoveryNoticeBanner: View {
+    let message: String
+    let onDismiss: () -> Void
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "checkmark.shield")
+                .foregroundStyle(.green)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            Button {
+                onDismiss()
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.borderless)
+            .help("Dismiss recovery notice")
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(.regularMaterial)
     }
 }

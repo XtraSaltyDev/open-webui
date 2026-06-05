@@ -61,98 +61,54 @@ struct ToolServerInvocationService: ToolServerInvoking {
             )
         }
 
-        let process = Process()
-        let input = Pipe()
-        let output = Pipe()
-        let error = Pipe()
-        let outputCollector = PipeDataCollector(pipe: output)
-        let errorCollector = PipeDataCollector(pipe: error)
-
+        let executablePath: String
+        let arguments: [String]
         if command.contains("/") {
-            process.executableURL = URL(fileURLWithPath: command)
-            process.arguments = request.server.arguments
+            executablePath = command
+            arguments = request.server.arguments
         } else {
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            process.arguments = [command] + request.server.arguments
-        }
-        process.standardInput = input
-        process.standardOutput = output
-        process.standardError = error
-        process.environment = ProcessInfo.processInfo.environment.merging(request.server.environment) { _, new in
-            new
+            executablePath = "/usr/bin/env"
+            arguments = [command] + request.server.arguments
         }
 
-        do {
-            try process.run()
-            if let body = request.requestBody.data(using: .utf8) {
-                input.fileHandleForWriting.write(body)
-            }
-            try? input.fileHandleForWriting.close()
+        let timeoutSeconds = max(stdioTimeoutSeconds, 0.1)
+        let result = BoundedProcessRunner().run(
+            executablePath: executablePath,
+            arguments: arguments,
+            workingDirectoryPath: request.workingDirectoryPath,
+            environment: request.server.environment,
+            stdinData: request.requestBody.data(using: .utf8),
+            timeoutSeconds: timeoutSeconds,
+            maxCapturedOutputBytes: request.maxCapturedOutputBytes ?? CodeExecutionSettings().maxCapturedOutputBytes,
+            shouldCancel: { Task.isCancelled }
+        )
 
-            let timeoutSeconds = max(stdioTimeoutSeconds, 0.1)
-            let deadline = Date().addingTimeInterval(timeoutSeconds)
-            var timedOut = false
-            var cancelled = false
-            while process.isRunning {
-                if Task.isCancelled {
-                    cancelled = true
-                    break
-                }
-                if Date() >= deadline {
-                    timedOut = true
-                    break
-                }
-                Thread.sleep(forTimeInterval: 0.02)
-            }
-
-            if timedOut || cancelled {
-                if process.isRunning {
-                    process.terminate()
-                }
-                process.waitUntilExit()
-                let responseBody = outputCollector.collectedString()
-                _ = errorCollector.collectedString()
-                return failedRun(
-                    request,
-                    statusCode: nil,
-                    responseBody: responseBody,
-                    errorMessage: timedOut
-                        ? timeoutMessage(seconds: timeoutSeconds)
-                        : "Invocation cancelled.",
-                    startedAt: startedAt
-                )
-            }
-
-            process.waitUntilExit()
-
-            let responseBody = outputCollector.collectedString()
-            let errorBody = errorCollector.collectedString()
-            let exitCode = Int(process.terminationStatus)
-            let didSucceed = process.terminationReason == .exit && exitCode == 0
-            return AppToolServerRun(
-                serverID: request.server.id,
-                serverName: request.server.name,
-                serverKind: request.server.kind,
-                requestBody: request.requestBody,
-                responseBody: responseBody,
-                statusCode: exitCode,
-                status: didSucceed ? .succeeded : .failed,
-                errorMessage: didSucceed ? nil : Self.failureMessage(for: errorBody, exitCode: exitCode),
-                startedAt: startedAt,
-                completedAt: Date()
-            )
-        } catch {
-            outputCollector.close()
-            errorCollector.close()
-            try? input.fileHandleForWriting.close()
+        if result.timedOut || result.wasCancelled {
             return failedRun(
                 request,
                 statusCode: nil,
-                responseBody: "",
-                errorMessage: error.localizedDescription,
+                responseBody: result.stdout,
+                errorMessage: result.timedOut
+                    ? timeoutMessage(seconds: timeoutSeconds)
+                    : "Invocation cancelled.",
                 startedAt: startedAt
             )
         }
+
+        let exitCode = result.exitCode.map(Int.init)
+        let didSucceed = result.status == .succeeded
+        return AppToolServerRun(
+            serverID: request.server.id,
+            serverName: request.server.name,
+            serverKind: request.server.kind,
+            requestBody: request.requestBody,
+            responseBody: result.stdout,
+            statusCode: exitCode,
+            status: didSucceed ? .succeeded : .failed,
+            errorMessage: didSucceed ? nil : Self.failureMessage(for: result.stderr, exitCode: exitCode ?? -1),
+            startedAt: startedAt,
+            completedAt: result.completedAt
+        )
     }
 
     private static func timeoutMessage(seconds: TimeInterval) -> String {
@@ -244,37 +200,5 @@ struct ToolServerInvocationService: ToolServerInvoking {
 
     private static func defaultDataLoader(_ request: URLRequest) async throws -> (Data, URLResponse) {
         try await URLSession.shared.data(for: request)
-    }
-}
-
-private final class PipeDataCollector {
-    private let handle: FileHandle
-    private let lock = NSLock()
-    private var data = Data()
-
-    init(pipe: Pipe) {
-        handle = pipe.fileHandleForReading
-        handle.readabilityHandler = { [weak self] readableHandle in
-            let chunk = readableHandle.availableData
-            guard let self, !chunk.isEmpty else {
-                return
-            }
-            self.lock.lock()
-            self.data.append(chunk)
-            self.lock.unlock()
-        }
-    }
-
-    func collectedString() -> String {
-        close()
-        lock.lock()
-        let collected = data
-        lock.unlock()
-        return String(data: collected, encoding: .utf8) ?? ""
-    }
-
-    func close() {
-        handle.readabilityHandler = nil
-        try? handle.close()
     }
 }

@@ -79,7 +79,7 @@ struct CodeExecutionSettings: Codable, Equatable, Sendable {
         maxCapturedOutputBytes: Int = 1_048_576
     ) {
         self.allowedLanguages = allowedLanguages
-        self.allowedWorkingDirectoryRoots = allowedWorkingDirectoryRoots
+        self.allowedWorkingDirectoryRoots = Self.normalizedAllowedWorkingDirectoryRoots(allowedWorkingDirectoryRoots)
         self.allowedExecutableNames = allowedExecutableNames
         self.deniedExecutableNames = deniedExecutableNames
         self.maxTimeoutSeconds = maxTimeoutSeconds
@@ -90,8 +90,10 @@ struct CodeExecutionSettings: Codable, Equatable, Sendable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         allowedLanguages = try container.decodeIfPresent([CodeExecutionLanguage].self, forKey: .allowedLanguages)
             ?? CodeExecutionLanguage.allCases
-        allowedWorkingDirectoryRoots = try container.decodeIfPresent([String].self, forKey: .allowedWorkingDirectoryRoots)
-            ?? CodeExecutionSettings.defaultAllowedWorkingDirectoryRoots()
+        allowedWorkingDirectoryRoots = Self.normalizedAllowedWorkingDirectoryRoots(
+            try container.decodeIfPresent([String].self, forKey: .allowedWorkingDirectoryRoots)
+                ?? CodeExecutionSettings.defaultAllowedWorkingDirectoryRoots()
+        )
         allowedExecutableNames = try container.decodeIfPresent([String].self, forKey: .allowedExecutableNames) ?? []
         deniedExecutableNames = try container.decodeIfPresent([String].self, forKey: .deniedExecutableNames) ?? []
         maxTimeoutSeconds = try container.decodeIfPresent(Double.self, forKey: .maxTimeoutSeconds) ?? 30
@@ -99,11 +101,40 @@ struct CodeExecutionSettings: Codable, Equatable, Sendable {
     }
 
     static func defaultAllowedWorkingDirectoryRoots() -> [String] {
-        [
+        [LocalExecutionSettings.defaultSandboxRootPath()]
+    }
+
+    static func previousBroadDefaultAllowedWorkingDirectoryRoots() -> [String] {
+        uniqueNormalizedPaths([
             FileManager.default.homeDirectoryForCurrentUser.path,
             "/tmp",
             NSTemporaryDirectory()
-        ].map(normalizedPath)
+        ])
+    }
+
+    static func normalizedAllowedWorkingDirectoryRoots(_ roots: [String]) -> [String] {
+        let normalizedRoots = uniqueNormalizedPaths(roots)
+        guard !normalizedRoots.isEmpty else {
+            return defaultAllowedWorkingDirectoryRoots()
+        }
+        if normalizedRoots == previousBroadDefaultAllowedWorkingDirectoryRoots() {
+            return defaultAllowedWorkingDirectoryRoots()
+        }
+        return normalizedRoots
+    }
+
+    private static func uniqueNormalizedPaths(_ paths: [String]) -> [String] {
+        var seen = Set<String>()
+        return paths
+            .map(normalizedPath)
+            .filter { !$0.isEmpty }
+            .filter { path in
+                if seen.contains(path) {
+                    return false
+                }
+                seen.insert(path)
+                return true
+            }
     }
 }
 
@@ -114,18 +145,22 @@ enum CodeExecutionPolicyDecision: Equatable, Sendable {
 
 struct CodeExecutionPolicy: Sendable {
     var settings: CodeExecutionSettings
+    var localExecution: LocalExecutionSettings
 
     func evaluate(_ request: CodeExecutionRequest) -> CodeExecutionPolicyDecision {
+        let workingDirectory: String
+        switch localExecution.evaluate(workingDirectoryPath: request.workingDirectoryPath) {
+        case .allowed(let allowedWorkingDirectory):
+            workingDirectory = allowedWorkingDirectory
+        case .blocked(let reason):
+            return .blocked(reason: reason)
+        }
+
         guard settings.allowedLanguages.contains(request.language) else {
             return .blocked(reason: "\(request.language.label) execution is disabled by policy.")
         }
 
-        let workingDirectory = request.workingDirectoryPath
-            .map(Self.normalizedPath)
-            .flatMap { $0.isEmpty ? nil : $0 }
-
-        if let workingDirectory,
-           !isAllowedWorkingDirectory(workingDirectory) {
+        if !isAllowedWorkingDirectory(workingDirectory) {
             return .blocked(reason: "Working directory is outside the allowed code execution roots.")
         }
 
@@ -379,10 +414,6 @@ struct AppCodeExecutionRun: Identifiable, Codable, Equatable, Sendable {
 
 private extension CodeExecutionSettings {
     static func normalizedPath(_ path: String) -> String {
-        let expanded = (path.trimmingCharacters(in: .whitespacesAndNewlines) as NSString).expandingTildeInPath
-        guard !expanded.isEmpty else {
-            return ""
-        }
-        return URL(fileURLWithPath: expanded).standardizedFileURL.path
+        LocalExecutionSettings.normalizedPath(path)
     }
 }

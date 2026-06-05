@@ -73,6 +73,13 @@ struct OpenWebUINativeApp: App {
                 .keyboardShortcut("c", modifiers: [.command, .shift])
                 .disabled(store.selectedThread == nil)
 
+                Button("Refresh Models") {
+                    Task {
+                        await store.refreshModels()
+                    }
+                }
+                .keyboardShortcut("r", modifiers: [.command])
+
                 Button("Share Chat...") {
                     store.shareSelectedThreadAsMarkdown()
                 }

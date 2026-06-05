@@ -53,6 +53,7 @@ final class AppStoreTerminalSessionTests: XCTestCase {
         let fixture = try TerminalSessionFixture(executor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.terminalSessions, isEnabled: true)
         store.settings.codeExecution = CodeExecutionSettings(
             allowedLanguages: [.shell],
@@ -110,11 +111,31 @@ final class AppStoreTerminalSessionTests: XCTestCase {
         XCTAssertEqual(store.errorMessage, "Terminal Sessions is disabled.")
     }
 
+    func testRunTerminalCommandBlocksDisabledLocalExecutionBeforeCallingExecutor() async throws {
+        let executor = FakeTerminalCodeExecutor()
+        let fixture = try TerminalSessionFixture(executor: executor)
+        let store = fixture.makeStore()
+        await store.load()
+        await store.setFeatureToggle(.terminalSessions, isEnabled: true)
+        _ = await store.createTerminalSession(title: "Shell", workingDirectoryPath: LocalExecutionSettings.defaultSandboxRootPath())
+        store.terminalCommandInput = "pwd"
+
+        await store.runTerminalCommand()
+
+        let captured = await executor.capturedRequests
+        XCTAssertTrue(captured.isEmpty)
+        XCTAssertTrue(store.terminalCommands.isEmpty)
+        XCTAssertEqual(store.terminalError, LocalExecutionSettings.disabledMessage)
+        XCTAssertEqual(store.errorMessage, LocalExecutionSettings.disabledMessage)
+        XCTAssertFalse(store.isRunningTerminalCommand)
+    }
+
     func testTerminalExecutePermissionBlocksCommandBeforeCallingExecutor() async throws {
         let executor = FakeTerminalCodeExecutor()
         let fixture = try TerminalSessionFixture(executor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.terminalSessions, isEnabled: true)
         await store.createAdminUser(name: "Workspace User", email: "user@example.com", role: .user)
         let user = try XCTUnwrap(store.adminUsers.first)
@@ -148,6 +169,7 @@ final class AppStoreTerminalSessionTests: XCTestCase {
         let fixture = try TerminalSessionFixture(executor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.terminalSessions, isEnabled: true)
         await store.createAdminUser(name: "Workspace User", email: "user@example.com", role: .user)
         let user = try XCTUnwrap(store.adminUsers.first)
@@ -221,6 +243,7 @@ final class AppStoreTerminalSessionTests: XCTestCase {
         let fixture = try TerminalSessionFixture(executor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.terminalSessions, isEnabled: true)
         let createdSession = await store.createTerminalSession(title: "Delete Transcript", workingDirectoryPath: "/tmp")
         _ = try XCTUnwrap(createdSession)
@@ -332,6 +355,7 @@ final class AppStoreTerminalSessionTests: XCTestCase {
         let fixture = try TerminalSessionFixture(executor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.terminalSessions, isEnabled: true)
         let createdSourceSession = await store.createTerminalSession(title: "Source", workingDirectoryPath: "/tmp")
         let sourceSession = try XCTUnwrap(createdSourceSession)
@@ -369,6 +393,7 @@ final class AppStoreTerminalSessionTests: XCTestCase {
         let fixture = try TerminalSessionFixture(executor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.terminalSessions, isEnabled: true)
         let createdSession = await store.createTerminalSession(title: "Source", workingDirectoryPath: "/tmp")
         let session = try XCTUnwrap(createdSession)
@@ -411,6 +436,7 @@ final class AppStoreTerminalSessionTests: XCTestCase {
         let fixture = try TerminalSessionFixture(executor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.terminalSessions, isEnabled: true)
         let createdSession = await store.createTerminalSession(title: "Backup Terminal", workingDirectoryPath: "/tmp")
         let session = try XCTUnwrap(createdSession)
@@ -444,6 +470,7 @@ final class AppStoreTerminalSessionTests: XCTestCase {
         let fixture = try TerminalSessionFixture(executor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.terminalSessions, isEnabled: true)
         let createdSession = await store.createTerminalSession(title: "Delete Command", workingDirectoryPath: "/tmp")
         let session = try XCTUnwrap(createdSession)
@@ -486,6 +513,7 @@ final class AppStoreTerminalSessionTests: XCTestCase {
         let fixture = try TerminalSessionFixture(executor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.terminalSessions, isEnabled: true)
         let createdSession = await store.createTerminalSession(title: "Delete Session", workingDirectoryPath: "/tmp")
         let session = try XCTUnwrap(createdSession)

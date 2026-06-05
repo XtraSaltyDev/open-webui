@@ -11,12 +11,20 @@ struct SettingsStore: Sendable {
         self.decoder = JSONDecoder()
     }
 
+    var settingsFileURL: URL {
+        settingsURL
+    }
+
+    var appDataRootURL: URL {
+        settingsURL.deletingLastPathComponent()
+    }
+
     func load() async throws -> AppSettings {
         guard FileManager.default.fileExists(atPath: settingsURL.path) else {
-            return AppSettings()
+            return try preparedForUse(AppSettings())
         }
         let data = try Data(contentsOf: settingsURL)
-        return try decoder.decode(AppSettings.self, from: data)
+        return try preparedForUse(decoder.decode(AppSettings.self, from: data))
     }
 
     func save(_ settings: AppSettings) async throws {
@@ -32,5 +40,12 @@ struct SettingsStore: Sendable {
         return appSupport
             .appendingPathComponent("OpenWebUINative", isDirectory: true)
             .appendingPathComponent("settings.json")
+    }
+
+    private func preparedForUse(_ settings: AppSettings) throws -> AppSettings {
+        var preparedSettings = settings
+        preparedSettings.localExecution = settings.localExecution.normalized()
+        try preparedSettings.localExecution.ensureSandboxDirectoryExists()
+        return preparedSettings
     }
 }

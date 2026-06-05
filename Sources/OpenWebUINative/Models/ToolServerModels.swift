@@ -113,11 +113,21 @@ struct ToolServerToolCallRequest: Equatable, Sendable {
     var server: AppToolServer
     var toolName: String
     var arguments: JSONValue
+    var workingDirectoryPath: String?
+    var maxCapturedOutputBytes: Int?
 
-    init(server: AppToolServer, toolName: String, arguments: JSONValue = .object([:])) {
+    init(
+        server: AppToolServer,
+        toolName: String,
+        arguments: JSONValue = .object([:]),
+        workingDirectoryPath: String? = nil,
+        maxCapturedOutputBytes: Int? = nil
+    ) {
         self.server = server
         self.toolName = toolName
         self.arguments = arguments
+        self.workingDirectoryPath = workingDirectoryPath
+        self.maxCapturedOutputBytes = maxCapturedOutputBytes
     }
 }
 
@@ -129,10 +139,19 @@ enum ToolServerInvocationStatus: String, Codable, Equatable, Sendable {
 struct ToolServerInvocationRequest: Equatable, Sendable {
     var server: AppToolServer
     var requestBody: String
+    var workingDirectoryPath: String?
+    var maxCapturedOutputBytes: Int?
 
-    init(server: AppToolServer, requestBody: String = "{}") {
+    init(
+        server: AppToolServer,
+        requestBody: String = "{}",
+        workingDirectoryPath: String? = nil,
+        maxCapturedOutputBytes: Int? = nil
+    ) {
         self.server = server
         self.requestBody = requestBody
+        self.workingDirectoryPath = workingDirectoryPath
+        self.maxCapturedOutputBytes = maxCapturedOutputBytes
     }
 }
 

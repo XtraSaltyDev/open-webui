@@ -458,6 +458,53 @@ final class AppStoreToolServerTests: XCTestCase {
         XCTAssertEqual(store.errorMessage, "Tool server is disabled.")
     }
 
+    func testStdioToolServerActionsBlockDisabledLocalExecutionBeforeCallingServices() async throws {
+        let discoverer = FakeToolServerToolDiscoverer(
+            result: ToolServerToolDiscoveryResult(
+                status: .available("Discovered 1 tool."),
+                tools: [AppToolServerTool(name: "search_docs")]
+            )
+        )
+        let invoker = FakeToolServerInvoker()
+        let caller = FakeToolServerToolCaller()
+        let fixture = try ToolServerFixture(
+            toolServerInvoker: invoker,
+            toolServerDiscoverer: discoverer,
+            toolServerToolCaller: caller
+        )
+        let store = fixture.makeStore()
+        await store.load()
+        await store.setFeatureToggle(.directToolServers, isEnabled: true)
+        await store.createToolServer(
+            name: "Stdio Gateway",
+            kind: .stdio,
+            command: "/usr/bin/python3",
+            argumentsText: "",
+            baseURL: "",
+            environmentText: "",
+            isEnabled: true
+        )
+        let server = try XCTUnwrap(store.toolServers.first)
+
+        await store.discoverToolServerTools(server.id)
+        await store.invokeToolServer(server.id, requestBody: "{}")
+        await store.callToolServerTool(server.id, toolName: "search_docs", argumentsBody: "{}")
+
+        let discoveredServers = await discoverer.discoveredServers
+        let capturedInvocations = await invoker.capturedRequests
+        let capturedToolCalls = await caller.capturedRequests
+        XCTAssertTrue(discoveredServers.isEmpty)
+        XCTAssertTrue(capturedInvocations.isEmpty)
+        XCTAssertTrue(capturedToolCalls.isEmpty)
+        XCTAssertEqual(store.toolServerDiscoveryStatuses[server.id], .unavailable(LocalExecutionSettings.disabledMessage))
+        XCTAssertEqual(store.toolServerDiscoveryError, LocalExecutionSettings.disabledMessage)
+        XCTAssertEqual(store.toolServerInvocationError, LocalExecutionSettings.disabledMessage)
+        XCTAssertEqual(store.errorMessage, LocalExecutionSettings.disabledMessage)
+        XCTAssertFalse(store.isDiscoveringToolServerTools)
+        XCTAssertFalse(store.isInvokingToolServer)
+        XCTAssertTrue(store.toolServerRuns.isEmpty)
+    }
+
     func testToolExecutePermissionAllowsToolServerInvokeAndToolCallForCurrentUser() async throws {
         let invoker = FakeToolServerInvoker()
         let caller = FakeToolServerToolCaller()
@@ -920,7 +967,11 @@ private actor FakeToolServerToolDiscoverer: ToolServerToolDiscovering {
         self.result = result
     }
 
-    func discoverTools(for server: AppToolServer) async -> ToolServerToolDiscoveryResult {
+    func discoverTools(
+        for server: AppToolServer,
+        workingDirectoryPath: String?,
+        maxCapturedOutputBytes: Int?
+    ) async -> ToolServerToolDiscoveryResult {
         discoveredServers.append(server)
         return result
     }

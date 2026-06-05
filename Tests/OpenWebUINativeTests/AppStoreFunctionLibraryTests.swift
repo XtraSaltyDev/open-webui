@@ -91,6 +91,7 @@ final class AppStoreFunctionLibraryTests: XCTestCase {
         let fixture = try FunctionLibraryFixture()
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.createFunction(name: "Configurable action", kind: .action, content: "def action(body):\n    return body", description: nil)
         let function = try XCTUnwrap(store.functions.first)
 
@@ -181,6 +182,7 @@ final class AppStoreFunctionLibraryTests: XCTestCase {
         let fixture = try FunctionLibraryFixture(functionExecutor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
 
         let template = await store.functionValvesTemplateJSON(
             name: "Schema filter",
@@ -223,6 +225,7 @@ final class AppStoreFunctionLibraryTests: XCTestCase {
         let fixture = try FunctionLibraryFixture(functionExecutor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.createFunction(
             name: "Schema filter",
             kind: .filter,
@@ -688,6 +691,7 @@ final class AppStoreFunctionLibraryTests: XCTestCase {
         let fixture = try FunctionLibraryFixture(functionExecutor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.createFunction(
             name: "Safety filter",
             kind: .filter,
@@ -725,6 +729,29 @@ final class AppStoreFunctionLibraryTests: XCTestCase {
 
         XCTAssertEqual(reloadedStore.functionRuns.map(\.id), [runID])
         XCTAssertEqual(reloadedStore.functionRuns.first?.output, #"{"body":{"messages":[]}}"#)
+    }
+
+    func testLocalFunctionExecutionBlocksDisabledLocalExecutionBeforeCallingExecutor() async throws {
+        let executor = FakeLocalFunctionExecutor()
+        let fixture = try FunctionLibraryFixture(functionExecutor: executor)
+        let store = fixture.makeStore()
+        await store.load()
+        await store.createFunction(
+            name: "Safety filter",
+            kind: .filter,
+            content: "def inlet(body):\n    return body",
+            description: "Review prompts before sending."
+        )
+        let function = try XCTUnwrap(store.functions.first)
+
+        await store.runFunction(function.id, methodName: "inlet", inputBody: #"{"body":{"messages":[]}}"#)
+
+        let capturedRequests = await executor.capturedRequests
+        XCTAssertTrue(capturedRequests.isEmpty)
+        XCTAssertTrue(store.functionRuns.isEmpty)
+        XCTAssertEqual(store.functionExecutionError, LocalExecutionSettings.disabledMessage)
+        XCTAssertEqual(store.errorMessage, LocalExecutionSettings.disabledMessage)
+        XCTAssertFalse(store.isRunningFunction)
     }
 
     func testFunctionExecutePermissionBlocksLocalFunctionRunForCurrentUser() async throws {
@@ -831,6 +858,7 @@ final class AppStoreFunctionLibraryTests: XCTestCase {
         let fixture = try FunctionLibraryFixture(functionExecutor: executor, provider: provider)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.selectModel("fake-model")
         await store.createFunction(
             name: "Rewrite prompt",
@@ -875,6 +903,7 @@ final class AppStoreFunctionLibraryTests: XCTestCase {
         let fixture = try FunctionLibraryFixture(functionExecutor: executor, provider: provider)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.selectModel("fake-model")
         await store.createFunction(
             name: "Rewrite answer",
@@ -949,6 +978,7 @@ final class AppStoreFunctionLibraryTests: XCTestCase {
         let fixture = try FunctionLibraryFixture(functionExecutor: executor, provider: provider)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.createFunction(
             name: "Local pipe",
             kind: .pipe,
@@ -1001,6 +1031,7 @@ final class AppStoreFunctionLibraryTests: XCTestCase {
         let fixture = try FunctionLibraryFixture(functionExecutor: executor, provider: provider)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.createFunction(
             name: "Router pipe",
             kind: .pipe,
@@ -1046,6 +1077,7 @@ final class AppStoreFunctionLibraryTests: XCTestCase {
         let fixture = try FunctionLibraryFixture(functionExecutor: executor, provider: provider)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.createFunction(
             name: "Router pipe",
             kind: .pipe,
@@ -1165,6 +1197,7 @@ final class AppStoreFunctionLibraryTests: XCTestCase {
         let fixture = try FunctionLibraryFixture(functionExecutor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.createFunction(
             name: "Explain answer",
             kind: .action,
@@ -1192,6 +1225,7 @@ final class AppStoreFunctionLibraryTests: XCTestCase {
         )
         try await fixture.storage.save(thread)
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         store.selectedThreadID = thread.id
 
         await store.runActionFunction(function.id, messageID: assistantID)

@@ -696,6 +696,99 @@ final class AppStoreChatActionTests: XCTestCase {
         XCTAssertEqual(store.errorMessage, "Ollama does not support native chat.")
         XCTAssertEqual(provider.streamCallCount, 0)
     }
+
+    func testSendDraftPromptPreservesDraftAndAttachmentsWhenNoModelIsSelected() async throws {
+        let fixture = try StoreFixture(provider: FakeChatProvider(chunks: ["Answer"]))
+        let store = fixture.makeStore()
+        await store.load()
+        store.models = []
+        store.settings.selectedModelID = nil
+        store.settings.selectedModelIDs = []
+        store.draftPrompt = "Keep this draft"
+        let attachment = ChatAttachment(fileName: "notes.md", byteCount: 12, textContent: "remember this")
+        store.pendingAttachments = [attachment]
+
+        await store.sendDraftPrompt()
+
+        XCTAssertEqual(store.draftPrompt, "Keep this draft")
+        XCTAssertEqual(store.pendingAttachments, [attachment])
+        XCTAssertEqual(store.composerInlineMessage, "Choose a model before sending a message.")
+        XCTAssertEqual(store.errorMessage, "Choose a model before sending a message.")
+        XCTAssertTrue(store.threads.isEmpty)
+    }
+
+    func testSendDraftPromptBlocksWhitespaceWithInlineComposerMessage() async throws {
+        let fixture = try StoreFixture(provider: FakeChatProvider(chunks: ["Answer"]))
+        let store = fixture.makeStore()
+        await store.load()
+        store.draftPrompt = "   \n  "
+
+        await store.sendDraftPrompt()
+
+        XCTAssertEqual(store.draftPrompt, "   \n  ")
+        XCTAssertEqual(store.composerInlineMessage, "Type a message before sending.")
+        XCTAssertEqual(store.errorMessage, "Type a message before sending.")
+        XCTAssertTrue(store.threads.isEmpty)
+    }
+
+    func testSendDraftPromptClearsDraftAndComposerMessageAfterSuccessfulSend() async throws {
+        let fixture = try StoreFixture(provider: FakeChatProvider(chunks: ["Answer"]))
+        let store = fixture.makeStore()
+        await store.load()
+        store.draftPrompt = "Hello"
+        store.composerInlineMessage = "Old warning"
+
+        await store.sendDraftPrompt()
+
+        XCTAssertEqual(store.draftPrompt, "")
+        XCTAssertNil(store.composerInlineMessage)
+        XCTAssertEqual(store.selectedThread?.messages.map(\.content), ["Hello", "Answer"])
+    }
+
+    func testLoadNormalizesStaleStreamingAssistantMessages() async throws {
+        let fixture = try StoreFixture()
+        let assistantID = UUID()
+        let thread = ChatThread(
+            id: UUID(),
+            title: "Interrupted",
+            messages: [
+                ChatMessage(role: .user, content: "Are you there?"),
+                ChatMessage(
+                    id: assistantID,
+                    role: .assistant,
+                    content: "Partial",
+                    isStreaming: true,
+                    generationMetrics: ChatGenerationMetrics(startedAt: Date(timeIntervalSince1970: 100))
+                )
+            ]
+        )
+        try await fixture.storage.save(thread)
+
+        let store = fixture.makeStore()
+        await store.load()
+
+        let message = try XCTUnwrap(store.selectedThread?.messages.first { $0.id == assistantID })
+        XCTAssertFalse(message.isStreaming)
+        XCTAssertEqual(message.error, "Generation was interrupted before the app closed. Retry this response when ready.")
+        XCTAssertNotNil(message.generationMetrics?.completedAt)
+    }
+
+    func testLoadSkipsAndQuarantinesCorruptChatRecordWithRecoveryNotice() async throws {
+        let fixture = try StoreFixture()
+        let validThread = ChatThread(id: UUID(), title: "Healthy chat")
+        try await fixture.storage.save(validThread)
+        let chatsURL = fixture.rootURL.appendingPathComponent("Chats", isDirectory: true)
+        let corruptURL = chatsURL.appendingPathComponent("corrupt.json")
+        try Data("{ bad json".utf8).write(to: corruptURL)
+
+        let store = fixture.makeStore()
+        await store.load()
+
+        XCTAssertEqual(store.threads.map(\.title), ["Healthy chat"])
+        XCTAssertEqual(store.recoveryNotice, "Recovered startup data: skipped 1 corrupt chat record.")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: corruptURL.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: corruptURL.appendingPathExtension("corrupt").path))
+    }
 }
 
 private struct StoreFixture {

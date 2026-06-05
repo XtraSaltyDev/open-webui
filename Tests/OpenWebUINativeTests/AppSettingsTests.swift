@@ -76,6 +76,26 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.activeProviderID, ProviderConfiguration.defaultOllamaID)
     }
 
+    func testFirstRunSetupDefaultsIncompleteWithSafeLocalExecution() throws {
+        let settings = AppSettings()
+
+        XCTAssertFalse(settings.hasCompletedFirstRunSetup)
+        XCTAssertEqual(settings.activeProviderID, ProviderConfiguration.defaultOllamaID)
+        XCTAssertEqual(settings.activeProvider.kind, .ollama)
+        XCTAssertFalse(settings.localExecution.isEnabled)
+        XCTAssertFalse(settings.localExecution.hasAcceptedRiskWarning)
+    }
+
+    func testFirstRunSetupCompletedFlagRoundTripsThroughSettingsJSON() throws {
+        var settings = AppSettings()
+        settings.hasCompletedFirstRunSetup = true
+
+        let data = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: data)
+
+        XCTAssertTrue(decoded.hasCompletedFirstRunSetup)
+    }
+
     func testDecodingSettingsPreservesEmbeddingModelID() throws {
         let data = """
         {
@@ -182,5 +202,90 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(settings.codeExecution.allowedExecutableNames, [])
         XCTAssertEqual(settings.codeExecution.deniedExecutableNames, [])
         XCTAssertEqual(settings.codeExecution.maxTimeoutSeconds, 12)
+    }
+
+    func testLocalExecutionDefaultsDisabledWithSafeSandboxRoot() throws {
+        let settings = AppSettings()
+
+        XCTAssertFalse(settings.localExecution.isEnabled)
+        XCTAssertFalse(settings.localExecution.hasAcceptedRiskWarning)
+        XCTAssertEqual(settings.localExecution.sandboxRootPath, LocalExecutionSettings.defaultSandboxRootPath())
+        XCTAssertEqual(settings.codeExecution.allowedWorkingDirectoryRoots, [LocalExecutionSettings.defaultSandboxRootPath()])
+    }
+
+    func testDecodingOlderBroadDefaultCodeExecutionRootsMigratesToSafeSandboxRoot() throws {
+        let oldRoots = CodeExecutionSettings.previousBroadDefaultAllowedWorkingDirectoryRoots()
+            .map { #""\#($0)""# }
+            .joined(separator: ", ")
+        let data = """
+        {
+          "codeExecution": {
+            "allowedLanguages": ["shell", "python"],
+            "allowedWorkingDirectoryRoots": [\(oldRoots)],
+            "maxTimeoutSeconds": 12
+          }
+        }
+        """.data(using: .utf8)!
+
+        let settings = try JSONDecoder().decode(AppSettings.self, from: data)
+
+        XCTAssertEqual(settings.codeExecution.allowedWorkingDirectoryRoots, [LocalExecutionSettings.defaultSandboxRootPath()])
+    }
+
+    func testDecodingCustomCodeExecutionRootsDoesNotOverwriteThem() throws {
+        let data = """
+        {
+          "codeExecution": {
+            "allowedLanguages": ["shell"],
+            "allowedWorkingDirectoryRoots": ["/Users/example/Projects"],
+            "maxTimeoutSeconds": 12
+          }
+        }
+        """.data(using: .utf8)!
+
+        let settings = try JSONDecoder().decode(AppSettings.self, from: data)
+
+        XCTAssertEqual(settings.codeExecution.allowedWorkingDirectoryRoots, ["/Users/example/Projects"])
+    }
+
+    func testDecodingLocalExecutionExpandsTildeSandboxPath() throws {
+        let data = """
+        {
+          "localExecution": {
+            "isEnabled": true,
+            "hasAcceptedRiskWarning": true,
+            "sandboxRootPath": "~/OpenWebUINativeSandbox"
+          }
+        }
+        """.data(using: .utf8)!
+
+        let settings = try JSONDecoder().decode(AppSettings.self, from: data)
+
+        XCTAssertEqual(settings.localExecution.sandboxRootPath, LocalExecutionSettings.defaultSandboxRootPath())
+        XCTAssertFalse(settings.localExecution.sandboxRootPath.hasPrefix("~"))
+    }
+
+    func testSettingsStoreLoadCreatesConfiguredSandboxDirectory() async throws {
+        let rootURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString, isDirectory: true)
+        let sandboxURL = rootURL.appendingPathComponent("Sandbox", isDirectory: true)
+        let settingsURL = rootURL.appendingPathComponent("settings.json")
+        try FileManager.default.createDirectory(at: rootURL, withIntermediateDirectories: true)
+        let data = """
+        {
+          "localExecution": {
+            "isEnabled": true,
+            "hasAcceptedRiskWarning": true,
+            "sandboxRootPath": "\(sandboxURL.path)"
+          }
+        }
+        """.data(using: .utf8)!
+        try data.write(to: settingsURL)
+
+        let settings = try await SettingsStore(settingsURL: settingsURL).load()
+
+        var isDirectory: ObjCBool = false
+        XCTAssertTrue(FileManager.default.fileExists(atPath: settings.localExecution.sandboxRootPath, isDirectory: &isDirectory))
+        XCTAssertTrue(isDirectory.boolValue)
     }
 }

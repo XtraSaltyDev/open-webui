@@ -29,6 +29,12 @@ struct ComposerView: View {
                     .foregroundStyle(.secondary)
             }
 
+            if let composerInlineMessage = store.composerInlineMessage {
+                Label(composerInlineMessage, systemImage: "exclamationmark.circle")
+                    .font(.caption)
+                    .foregroundStyle(.red)
+            }
+
             if !store.recentWebSearchResults.isEmpty {
                 WebSearchPreviewStrip(
                     results: store.recentWebSearchResults,
@@ -76,13 +82,10 @@ struct ComposerView: View {
                     .disabled(store.isSending || !store.currentUserCanUseWebSearch)
                 }
 
-                TextField("Message Ollama...", text: $store.draftPrompt, axis: .vertical)
+                TextField("Message \(store.activeProvider.name)...", text: $store.draftPrompt, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...6)
                     .focused($focused)
-                    .onSubmit {
-                        send()
-                    }
 
                 if store.isSending {
                     if let progressText = store.chatGenerationProgressText {
@@ -105,7 +108,7 @@ struct ComposerView: View {
                     } label: {
                         Label("Send", systemImage: "paperplane.fill")
                     }
-                    .disabled(!store.canChat || store.draftPrompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    .disabled(!store.canChat || store.isSending)
                     .keyboardShortcut(.return, modifiers: [.command])
                 }
             }
@@ -128,11 +131,17 @@ struct ComposerView: View {
         .onAppear {
             focused = true
         }
+        .onExitCommand {
+            focused = false
+            store.clearComposerTransientState()
+        }
     }
 
     private func send() {
         Task {
-            await store.sendDraftPrompt()
+            if await store.sendDraftPrompt() {
+                focused = true
+            }
         }
     }
 }

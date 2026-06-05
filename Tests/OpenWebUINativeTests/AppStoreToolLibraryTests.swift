@@ -149,6 +149,7 @@ final class AppStoreToolLibraryTests: XCTestCase {
         let fixture = try ToolLibraryFixture(toolExecutor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
 
         let template = await store.toolValvesTemplateJSON(
             name: "Schema tool",
@@ -189,6 +190,7 @@ final class AppStoreToolLibraryTests: XCTestCase {
         let fixture = try ToolLibraryFixture(toolExecutor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.createTool(
             name: "Schema tool",
             content: "class Valves:\n    pass\nclass Tools:\n    pass",
@@ -611,6 +613,7 @@ final class AppStoreToolLibraryTests: XCTestCase {
         let fixture = try ToolLibraryFixture(toolExecutor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.createTool(
             name: "Weather lookup",
             content: "class Tools:\n    def get_weather(self, city):\n        return city",
@@ -643,6 +646,28 @@ final class AppStoreToolLibraryTests: XCTestCase {
 
         XCTAssertEqual(reloadedStore.toolRuns.map(\.id), [runID])
         XCTAssertEqual(reloadedStore.toolRuns.first?.output, "Weather in Chicago is clear.")
+    }
+
+    func testLocalToolExecutionBlocksDisabledLocalExecutionBeforeCallingExecutor() async throws {
+        let executor = FakeLocalToolExecutor()
+        let fixture = try ToolLibraryFixture(toolExecutor: executor)
+        let store = fixture.makeStore()
+        await store.load()
+        await store.createTool(
+            name: "Weather lookup",
+            content: "class Tools:\n    def get_weather(self, city):\n        return city",
+            description: "Fetch weather."
+        )
+        let tool = try XCTUnwrap(store.tools.first)
+
+        await store.runTool(tool.id, functionName: "get_weather", argumentsBody: #"{"city":"Chicago"}"#)
+
+        let capturedRequests = await executor.capturedRequests
+        XCTAssertTrue(capturedRequests.isEmpty)
+        XCTAssertTrue(store.toolRuns.isEmpty)
+        XCTAssertEqual(store.toolExecutionError, LocalExecutionSettings.disabledMessage)
+        XCTAssertEqual(store.errorMessage, LocalExecutionSettings.disabledMessage)
+        XCTAssertFalse(store.isRunningTool)
     }
 
     func testLocalToolExecutionBlocksDisabledFeatureBeforeCallingExecutor() async throws {

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct SettingsView: View {
@@ -15,6 +16,9 @@ struct SettingsView: View {
     @State private var webSearchDomainFilters: String = ""
     @State private var isWebPageContentLoadingEnabled = false
     @State private var maxWebPageContentCharacters = 4_000
+    @State private var isLocalExecutionEnabled = false
+    @State private var hasAcceptedLocalExecutionRiskWarning = false
+    @State private var localExecutionSandboxRootPath = ""
     @State private var isShellExecutionAllowed = true
     @State private var isPythonExecutionAllowed = true
     @State private var codeExecutionAllowedRoots = ""
@@ -22,6 +26,8 @@ struct SettingsView: View {
     @State private var codeExecutionDeniedExecutables = ""
     @State private var codeExecutionMaxTimeoutSeconds = 30
     @State private var isShowingRemoveProviderConfirmation = false
+    @State private var selectedAutomaticBackupID: AutomaticWorkspaceBackup.ID?
+    @State private var isShowingRestoreBackupConfirmation = false
 
     var body: some View {
         Form {
@@ -211,6 +217,143 @@ struct SettingsView: View {
                 Text("Exports chats, folders, files, knowledge, workspace libraries, admin records, settings, calendar, channels, automations, notes, feedback, analytics source data, and playground history. Keychain secret values are not exported.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+
+                Divider()
+
+                HStack {
+                    Button("Save Safety Backup") {
+                        Task {
+                            await store.exportCurrentWorkspaceSafetyBackup()
+                        }
+                    }
+
+                    Button("Reveal Backup Folder") {
+                        store.revealAutomaticBackupFolderInFinder()
+                    }
+
+                    Button("Refresh") {
+                        store.refreshAutomaticBackups()
+                    }
+                }
+
+                if store.automaticBackups.isEmpty {
+                    Text("No automatic safety backups yet.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Picker("Restore point", selection: $selectedAutomaticBackupID) {
+                        Text("Choose a backup").tag(Optional<AutomaticWorkspaceBackup.ID>.none)
+                        ForEach(Array(store.automaticBackups.prefix(10))) { backup in
+                            Text(backupLabel(for: backup)).tag(Optional(backup.id))
+                        }
+                    }
+
+                    ForEach(Array(store.automaticBackups.prefix(5))) { backup in
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text(backup.timestamp.formatted(date: .abbreviated, time: .shortened))
+                                Text(ByteCountFormatter.string(fromByteCount: Int64(backup.byteCount), countStyle: .file))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            if selectedAutomaticBackupID == backup.id {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundStyle(.green)
+                            }
+                        }
+                    }
+
+                    Button("Restore Selected Backup", role: .destructive) {
+                        isShowingRestoreBackupConfirmation = true
+                    }
+                    .disabled(selectedAutomaticBackupID == nil)
+                }
+            }
+
+            Section("Diagnostics") {
+                let diagnostics = store.diagnosticsSnapshot
+                LabeledContent("App version") {
+                    Text("\(diagnostics.appVersion) (\(diagnostics.appBuild))")
+                }
+                LabeledContent("Data root") {
+                    Text(diagnostics.appDataRootPath).textSelection(.enabled)
+                }
+                LabeledContent("Settings file") {
+                    Text(diagnostics.settingsFilePath).textSelection(.enabled)
+                }
+                LabeledContent("Chat storage") {
+                    Text(diagnostics.chatStoragePath).textSelection(.enabled)
+                }
+                LabeledContent("Backup path") {
+                    Text(diagnostics.backupPath).textSelection(.enabled)
+                }
+                HStack {
+                    Button("Reveal Data Root") {
+                        revealInFinder(store.appDataPaths.appDataRootURL)
+                    }
+                    Button("Reveal Chats") {
+                        revealInFinder(store.appDataPaths.chatStorageURL)
+                    }
+                    Button("Reveal Backups") {
+                        revealInFinder(store.appDataPaths.backupRootURL)
+                    }
+                }
+
+                Divider()
+
+                LabeledContent("Active provider") {
+                    Text("\(diagnostics.activeProviderName) - \(diagnostics.activeProviderKind)")
+                }
+                LabeledContent("Base URL") {
+                    Text(diagnostics.activeProviderBaseURL).textSelection(.enabled)
+                }
+                LabeledContent("Provider health") {
+                    Text(diagnostics.providerHealthStatus)
+                }
+                LabeledContent("Chats") {
+                    Text("\(diagnostics.chatCount)")
+                }
+                LabeledContent("Selected chat") {
+                    if let selectedThreadID = diagnostics.selectedThreadID {
+                        VStack(alignment: .trailing, spacing: 2) {
+                            Text(diagnostics.selectedThreadTitle ?? "Untitled chat")
+                            Text(selectedThreadID.uuidString)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                    } else {
+                        Text("None")
+                    }
+                }
+                LabeledContent("Selected messages") {
+                    Text("\(diagnostics.selectedThreadMessageCount)")
+                }
+                LabeledContent("Active streams") {
+                    Text("\(diagnostics.activeStreamingBranchCount)")
+                }
+                LabeledContent("Model count") {
+                    Text("\(diagnostics.modelCount)")
+                }
+                LabeledContent("Selected models") {
+                    Text(diagnostics.currentModelSelectionSummary)
+                }
+                LabeledContent("Embedding model") {
+                    Text(diagnostics.selectedEmbeddingModelID ?? "Use chat model")
+                }
+                LabeledContent("Local execution") {
+                    Text(diagnostics.localExecutionEnabled ? "Enabled" : "Disabled")
+                }
+                LabeledContent("Sandbox root") {
+                    Text(diagnostics.localExecutionSandboxRootPath).textSelection(.enabled)
+                }
+                LabeledContent("Latest backup") {
+                    Text(diagnostics.latestAutomaticBackupTimestamp?.formatted(date: .abbreviated, time: .shortened) ?? "None")
+                }
+                LabeledContent("Recent app notice") {
+                    Text(diagnostics.recentErrorSummary ?? "None")
+                }
             }
 
             Section("Web Search") {
@@ -284,6 +427,42 @@ struct SettingsView: View {
                 }
             }
 
+            Section("Local Execution") {
+                Text("Local Execution runs shell, Python, tools, functions, and stdio tool servers on this Mac as your user account. Only enable this for code and tools you trust. Keep the sandbox root narrow.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+
+                TextField("Sandbox root", text: $localExecutionSandboxRootPath)
+                    .textFieldStyle(.roundedBorder)
+
+                Toggle("I understand the local execution risk", isOn: $hasAcceptedLocalExecutionRiskWarning)
+
+                Toggle("Enable Local Execution", isOn: $isLocalExecutionEnabled)
+                    .disabled(!hasAcceptedLocalExecutionRiskWarning)
+
+                HStack {
+                    Button("Save Local Execution") {
+                        Task {
+                            await store.updateLocalExecutionSettings(
+                                LocalExecutionSettings(
+                                    isEnabled: isLocalExecutionEnabled,
+                                    hasAcceptedRiskWarning: hasAcceptedLocalExecutionRiskWarning,
+                                    sandboxRootPath: localExecutionSandboxRootPath
+                                )
+                            )
+                            syncLocalFields()
+                        }
+                    }
+
+                    Button("Reset to Safe Sandbox") {
+                        Task {
+                            await store.resetLocalExecutionSandboxToSafeDefault()
+                            syncLocalFields()
+                        }
+                    }
+                }
+            }
+
             Section("Code Execution Policy") {
                 Toggle("Allow shell", isOn: $isShellExecutionAllowed)
                 Toggle("Allow Python", isOn: $isPythonExecutionAllowed)
@@ -345,6 +524,7 @@ struct SettingsView: View {
         .padding()
         .onAppear {
             syncLocalFields()
+            store.refreshAutomaticBackups()
         }
         .onChange(of: store.settings.ollamaBaseURL) {
             syncLocalFields()
@@ -360,6 +540,19 @@ struct SettingsView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The OpenAI-compatible provider and its Keychain API key will be removed.")
+        }
+        .alert("Restore Backup?", isPresented: $isShowingRestoreBackupConfirmation) {
+            Button("Restore", role: .destructive) {
+                if let selectedAutomaticBackupID {
+                    Task {
+                        await store.restoreAutomaticBackup(id: selectedAutomaticBackupID)
+                        self.selectedAutomaticBackupID = nil
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("A safety backup of the current workspace will be created before restoring the selected backup.")
         }
     }
 
@@ -377,6 +570,9 @@ struct SettingsView: View {
         webSearchDomainFilters = store.settings.webSearch.domainFilterList.joined(separator: ", ")
         isWebPageContentLoadingEnabled = store.settings.webSearch.isPageContentLoadingEnabled
         maxWebPageContentCharacters = store.settings.webSearch.maxPageContentCharacters
+        isLocalExecutionEnabled = store.settings.localExecution.isEnabled
+        hasAcceptedLocalExecutionRiskWarning = store.settings.localExecution.hasAcceptedRiskWarning
+        localExecutionSandboxRootPath = store.settings.localExecution.sandboxRootPath
         isShellExecutionAllowed = store.settings.codeExecution.allowedLanguages.contains(.shell)
         isPythonExecutionAllowed = store.settings.codeExecution.allowedLanguages.contains(.python)
         codeExecutionAllowedRoots = store.settings.codeExecution.allowedWorkingDirectoryRoots.joined(separator: ", ")
@@ -425,6 +621,15 @@ struct SettingsView: View {
             languages.append(.python)
         }
         return languages
+    }
+
+    private func backupLabel(for backup: AutomaticWorkspaceBackup) -> String {
+        let size = ByteCountFormatter.string(fromByteCount: Int64(backup.byteCount), countStyle: .file)
+        return "\(backup.timestamp.formatted(date: .abbreviated, time: .shortened)) - \(size)"
+    }
+
+    private func revealInFinder(_ url: URL) {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
     }
 }
 

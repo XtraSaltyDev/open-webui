@@ -22,6 +22,7 @@ final class AppStoreCodeInterpreterTests: XCTestCase {
         let fixture = try CodeInterpreterFixture(executor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.codeInterpreter, isEnabled: true)
         store.codeExecutionLanguage = .shell
         store.codeExecutionInput = "  printf hello  "
@@ -70,6 +71,26 @@ final class AppStoreCodeInterpreterTests: XCTestCase {
         XCTAssertTrue(persistedRuns.isEmpty)
     }
 
+    func testRunCodeExecutionBlocksDisabledLocalExecutionBeforeCallingExecutor() async throws {
+        let executor = FakeCodeExecutor()
+        let fixture = try CodeInterpreterFixture(executor: executor)
+        let store = fixture.makeStore()
+        await store.load()
+        await store.setFeatureToggle(.codeInterpreter, isEnabled: true)
+        store.codeExecutionLanguage = .shell
+        store.codeExecutionInput = "printf hello"
+        store.codeExecutionWorkingDirectory = LocalExecutionSettings.defaultSandboxRootPath()
+
+        await store.runCodeExecution()
+
+        let captured = await executor.capturedRequests
+        XCTAssertTrue(captured.isEmpty)
+        XCTAssertTrue(store.codeExecutionRuns.isEmpty)
+        XCTAssertEqual(store.codeExecutionError, LocalExecutionSettings.disabledMessage)
+        XCTAssertEqual(store.errorMessage, LocalExecutionSettings.disabledMessage)
+        XCTAssertFalse(store.isRunningCodeExecution)
+    }
+
     func testRunCodeExecutionShowsEmptyCodeErrorWithoutCallingExecutor() async throws {
         let executor = FakeCodeExecutor()
         let store = AppStore(secretStore: InMemorySecretStore(), codeExecutor: executor)
@@ -88,6 +109,7 @@ final class AppStoreCodeInterpreterTests: XCTestCase {
     func testRunCodeExecutionBlocksDisabledLanguageWithoutCallingExecutor() async throws {
         let executor = FakeCodeExecutor()
         let store = AppStore(secretStore: InMemorySecretStore(), codeExecutor: executor)
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.codeInterpreter, isEnabled: true)
         store.settings.codeExecution = CodeExecutionSettings(
             allowedLanguages: [.python],
@@ -110,6 +132,7 @@ final class AppStoreCodeInterpreterTests: XCTestCase {
     func testRunCodeExecutionBlocksDeniedExecutableWithoutCallingExecutor() async throws {
         let executor = FakeCodeExecutor()
         let store = AppStore(secretStore: InMemorySecretStore(), codeExecutor: executor)
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.codeInterpreter, isEnabled: true)
         store.settings.codeExecution = CodeExecutionSettings(
             allowedLanguages: [.shell],
@@ -133,6 +156,7 @@ final class AppStoreCodeInterpreterTests: XCTestCase {
     func testRunCodeExecutionCapsTimeoutBeforeCallingExecutor() async throws {
         let executor = FakeCodeExecutor()
         let store = AppStore(secretStore: InMemorySecretStore(), codeExecutor: executor)
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.codeInterpreter, isEnabled: true)
         store.settings.codeExecution = CodeExecutionSettings(
             allowedLanguages: [.shell],
@@ -155,6 +179,7 @@ final class AppStoreCodeInterpreterTests: XCTestCase {
         let fixture = try CodeInterpreterFixture(executor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.codeInterpreter, isEnabled: true)
         await store.createAdminUser(name: "Workspace User", email: "user@example.com", role: .user)
         let user = try XCTUnwrap(store.adminUsers.first)
@@ -202,6 +227,7 @@ final class AppStoreCodeInterpreterTests: XCTestCase {
         let fixture = try CodeInterpreterFixture(executor: executor)
         let store = fixture.makeStore()
         await store.load()
+        store.enableLocalExecutionForTests(sandboxRootPath: "/tmp")
         await store.setFeatureToggle(.codeInterpreter, isEnabled: true)
         await store.createAdminUser(name: "Workspace User", email: "user@example.com", role: .user)
         store.codeExecutionLanguage = .shell

@@ -242,7 +242,7 @@ private struct MessageBubble: View {
                         store.cancelAssistantBranch(messageID: message.id)
                     }
                 }
-                Button("Regenerate") {
+                Button(message.error == nil ? "Regenerate" : "Retry") {
                     Task {
                         await store.regenerateResponse(messageID: message.id)
                     }
@@ -393,6 +393,9 @@ private struct MessageBubble: View {
             if message.isStreaming {
                 ProgressView()
                     .controlSize(.small)
+                Text("Generating...")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
             if let rating = message.rating {
                 Text(rating.label)
@@ -614,10 +617,10 @@ private struct MessageActions: View {
                 Button {
                     onRegenerate()
                 } label: {
-                    Label("Regenerate", systemImage: "arrow.clockwise")
+                    Label(message.error == nil ? "Regenerate" : "Retry", systemImage: "arrow.clockwise")
                 }
                 .labelStyle(.iconOnly)
-                .help("Regenerate response")
+                .help(message.error == nil ? "Regenerate response" : "Retry response")
                 .disabled(!canRegenerate || message.isStreaming)
 
                 Button {
