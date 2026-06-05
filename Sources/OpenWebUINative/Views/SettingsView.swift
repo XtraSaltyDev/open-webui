@@ -28,6 +28,9 @@ struct SettingsView: View {
     @State private var isShowingRemoveProviderConfirmation = false
     @State private var selectedAutomaticBackupID: AutomaticWorkspaceBackup.ID?
     @State private var isShowingRestoreBackupConfirmation = false
+    @State private var isOllamaAutoStartEnabled = false
+    @State private var shouldStopAppOwnedOllamaOnQuit = false
+    @State private var ollamaPreferredStartMethod: OllamaStartMethod = .automatic
 
     var body: some View {
         Form {
@@ -100,6 +103,50 @@ struct SettingsView: View {
             }
 
             Section("Ollama") {
+                LabeledContent("Runtime") {
+                    Text(store.ollamaRuntimeStatus.label)
+                        .textSelection(.enabled)
+                }
+
+                Toggle("Auto-start when selected", isOn: $isOllamaAutoStartEnabled)
+                Toggle("Stop app-owned CLI on quit", isOn: $shouldStopAppOwnedOllamaOnQuit)
+
+                Picker("Start method", selection: $ollamaPreferredStartMethod) {
+                    ForEach(OllamaStartMethod.allCases, id: \.self) { method in
+                        Text(method.label).tag(method)
+                    }
+                }
+
+                HStack {
+                    Button("Save Runtime Settings") {
+                        Task {
+                            await store.updateOllamaRuntimeSettings(
+                                autoStartEnabled: isOllamaAutoStartEnabled,
+                                stopAppOwnedServerOnQuit: shouldStopAppOwnedOllamaOnQuit,
+                                preferredStartMethod: ollamaPreferredStartMethod
+                            )
+                        }
+                    }
+
+                    Button("Start Ollama") {
+                        Task {
+                            await store.startOllama()
+                        }
+                    }
+                    .disabled(store.isStartingOllama)
+
+                    Button("Recheck") {
+                        Task {
+                            await store.refreshOllamaRuntimeStatus()
+                            if store.ollamaRuntimeStatus.isReachable {
+                                await store.refreshModels()
+                            }
+                        }
+                    }
+
+                    Link("Download", destination: URL(string: "https://ollama.com/download")!)
+                }
+
                 TextField("Base URL", text: $ollamaBaseURL)
                     .textFieldStyle(.roundedBorder)
 
@@ -115,6 +162,36 @@ struct SettingsView: View {
                     }
                 }
                 .disabled(!SettingsOllamaProviderFormPresentation.isSaveEnabled(baseURL: ollamaBaseURL))
+
+                Divider()
+
+                HStack {
+                    Button("Test Ollama Chat") {
+                        Task {
+                            await store.testOllamaChat()
+                        }
+                    }
+                    .disabled(store.isTestingOllamaChat)
+
+                    if store.isTestingOllamaChat {
+                        ProgressView()
+                            .controlSize(.small)
+                    }
+                }
+
+                if let ollamaChatTestResult = store.ollamaChatTestResult {
+                    Text(ollamaChatTestResult)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+
+                if let latestOllamaChatTestErrorSummary = store.latestOllamaChatTestErrorSummary {
+                    Text(latestOllamaChatTestErrorSummary)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .textSelection(.enabled)
+                }
             }
 
             Section("OpenAI-Compatible API") {
@@ -310,6 +387,36 @@ struct SettingsView: View {
                 }
                 LabeledContent("Provider health") {
                     Text(diagnostics.providerHealthStatus)
+                }
+                LabeledContent("Ollama base URL") {
+                    Text(diagnostics.ollamaBaseURL).textSelection(.enabled)
+                }
+                LabeledContent("Ollama runtime") {
+                    Text(diagnostics.ollamaRuntimeStatus).textSelection(.enabled)
+                }
+                LabeledContent("Ollama version") {
+                    Text(diagnostics.ollamaVersion ?? "Unavailable")
+                }
+                LabeledContent("Ollama models") {
+                    Text("\(diagnostics.ollamaModelCount)")
+                }
+                LabeledContent("Selected Ollama model") {
+                    Text(diagnostics.selectedOllamaModelID ?? "None")
+                }
+                LabeledContent("Ollama auto-start") {
+                    Text(diagnostics.ollamaAutoStartEnabled ? "Enabled" : "Disabled")
+                }
+                LabeledContent("Ollama start method") {
+                    Text(diagnostics.ollamaPreferredStartMethod)
+                }
+                LabeledContent("App-owned Ollama CLI") {
+                    Text(diagnostics.ollamaOwnsRunningCLIProcess ? "Running" : "Not running")
+                }
+                LabeledContent("Latest Ollama health error") {
+                    Text(diagnostics.latestOllamaHealthError ?? "None").textSelection(.enabled)
+                }
+                LabeledContent("Latest Ollama chat test error") {
+                    Text(diagnostics.latestOllamaChatTestErrorSummary ?? "None").textSelection(.enabled)
                 }
                 LabeledContent("Chats") {
                     Text("\(diagnostics.chatCount)")
@@ -558,6 +665,9 @@ struct SettingsView: View {
 
     private func syncLocalFields() {
         ollamaBaseURL = store.settings.ollamaBaseURL
+        isOllamaAutoStartEnabled = store.settings.ollamaAutoStartEnabled
+        shouldStopAppOwnedOllamaOnQuit = store.settings.ollamaStopAppOwnedServerOnQuit
+        ollamaPreferredStartMethod = store.settings.ollamaPreferredStartMethod
         let openAIForm = SettingsOpenAIProviderFormPresentation.presentation(for: store.openAICompatibleProvider)
         openAIProviderName = openAIForm.name
         openAIBaseURL = openAIForm.baseURL

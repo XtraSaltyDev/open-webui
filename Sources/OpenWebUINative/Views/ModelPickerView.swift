@@ -35,6 +35,19 @@ struct ModelPickerView: View {
             }
             .layoutPriority(2)
 
+            if store.activeProvider.kind == .ollama, !store.ollamaRuntimeStatus.isReachable {
+                Button {
+                    Task {
+                        await store.startOllama()
+                    }
+                } label: {
+                    Label("Start Ollama", systemImage: "play.fill")
+                }
+                .labelStyle(.iconOnly)
+                .help("Start Ollama")
+                .disabled(store.isStartingOllama)
+            }
+
             multiModelMenu
 
             Button {

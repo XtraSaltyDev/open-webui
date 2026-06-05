@@ -68,10 +68,25 @@ struct ProviderErrorPresentation: Equatable, Sendable {
                 message: "\(providerName) returned a response this app could not read. Refresh models or try again.",
                 technicalDetail: error.localizedDescription
             )
-        case .httpStatus(let statusCode):
+        case .httpStatus(let statusCode, let message, let bodySnippet, let endpoint):
             return ProviderErrorPresentation(
-                message: httpStatusMessage(statusCode: statusCode, providerName: providerName, provider: provider),
-                technicalDetail: "HTTP \(statusCode)"
+                message: httpStatusMessage(
+                    statusCode: statusCode,
+                    providerName: providerName,
+                    provider: provider,
+                    message: message,
+                    endpoint: endpoint
+                ),
+                technicalDetail: httpStatusTechnicalDetail(
+                    statusCode: statusCode,
+                    endpoint: endpoint,
+                    bodySnippet: bodySnippet
+                )
+            )
+        case .malformedStreamLine(let endpoint, let lineSnippet):
+            return ProviderErrorPresentation(
+                message: "\(providerName) returned malformed streaming JSON from \(endpoint). Try again or check the provider logs.",
+                technicalDetail: "Malformed stream line from \(endpoint): \(lineSnippet)"
             )
         case .missingAPIKey(let name):
             return ProviderErrorPresentation(
@@ -84,6 +99,12 @@ struct ProviderErrorPresentation: Equatable, Sendable {
                 technicalDetail: error.localizedDescription
             )
         case .selectedModelUnavailable(let modelID):
+            if provider?.kind == .ollama {
+                return ProviderErrorPresentation(
+                    message: "Selected Ollama model '\(modelID)' is not installed. Pull it or choose another model.",
+                    technicalDetail: error.localizedDescription
+                )
+            }
             return ProviderErrorPresentation(
                 message: "The selected model \(modelID) is no longer available. Refresh models and choose another default.",
                 technicalDetail: error.localizedDescription
@@ -127,8 +148,16 @@ struct ProviderErrorPresentation: Equatable, Sendable {
     private static func httpStatusMessage(
         statusCode: Int,
         providerName: String,
-        provider: ProviderConfiguration?
+        provider: ProviderConfiguration?,
+        message: String?,
+        endpoint: String?
     ) -> String {
+        if provider?.kind == .ollama {
+            let endpointText = endpoint.map { " from \($0)" } ?? ""
+            let messageText = message.map { ": \($0)" } ?? ""
+            return "Ollama returned HTTP \(statusCode)\(endpointText)\(messageText)"
+        }
+
         switch statusCode {
         case 401, 403:
             return "\(providerName) returned HTTP \(statusCode). Check the API key, base URL, and model access."
@@ -141,6 +170,20 @@ struct ProviderErrorPresentation: Equatable, Sendable {
         default:
             return "\(providerName) returned HTTP \(statusCode). Check the provider settings and try again."
         }
+    }
+
+    private static func httpStatusTechnicalDetail(
+        statusCode: Int,
+        endpoint: String?,
+        bodySnippet: String?
+    ) -> String {
+        [
+            "HTTP \(statusCode)",
+            endpoint.map { "endpoint=\($0)" },
+            bodySnippet.map { "body=\($0)" }
+        ]
+        .compactMap { $0 }
+        .joined(separator: " ")
     }
 
     private static func unsupportedFeatureMessage(

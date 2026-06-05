@@ -1614,6 +1614,9 @@ struct WebSearchSettings: Codable, Equatable, Sendable {
 
 struct AppSettings: Codable, Equatable, Sendable {
     var ollamaBaseURL: String
+    var ollamaAutoStartEnabled: Bool
+    var ollamaStopAppOwnedServerOnQuit: Bool
+    var ollamaPreferredStartMethod: OllamaStartMethod
     var providers: [ProviderConfiguration]
     var activeProviderID: UUID
     var selectedModelID: String?
@@ -1627,6 +1630,9 @@ struct AppSettings: Codable, Equatable, Sendable {
 
     init(
         ollamaBaseURL: String = "http://localhost:11434",
+        ollamaAutoStartEnabled: Bool = false,
+        ollamaStopAppOwnedServerOnQuit: Bool = false,
+        ollamaPreferredStartMethod: OllamaStartMethod = .automatic,
         providers: [ProviderConfiguration]? = nil,
         activeProviderID: UUID = ProviderConfiguration.defaultOllamaID,
         selectedModelID: String? = nil,
@@ -1639,6 +1645,9 @@ struct AppSettings: Codable, Equatable, Sendable {
         hasCompletedFirstRunSetup: Bool = false
     ) {
         self.ollamaBaseURL = ollamaBaseURL
+        self.ollamaAutoStartEnabled = ollamaAutoStartEnabled
+        self.ollamaStopAppOwnedServerOnQuit = ollamaStopAppOwnedServerOnQuit
+        self.ollamaPreferredStartMethod = ollamaPreferredStartMethod
         let resolvedProviders = providers ?? [ProviderConfiguration.defaultOllama(baseURL: ollamaBaseURL)]
         self.providers = resolvedProviders
         self.activeProviderID = activeProviderID
@@ -1658,6 +1667,9 @@ struct AppSettings: Codable, Equatable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case ollamaBaseURL
+        case ollamaAutoStartEnabled
+        case ollamaStopAppOwnedServerOnQuit
+        case ollamaPreferredStartMethod
         case providers
         case activeProviderID
         case selectedModelID
@@ -1684,6 +1696,12 @@ struct AppSettings: Codable, Equatable, Sendable {
 
         self.init(
             ollamaBaseURL: ollamaBaseURL,
+            ollamaAutoStartEnabled: try container.decodeIfPresent(Bool.self, forKey: .ollamaAutoStartEnabled) ?? false,
+            ollamaStopAppOwnedServerOnQuit: try container.decodeIfPresent(Bool.self, forKey: .ollamaStopAppOwnedServerOnQuit) ?? false,
+            ollamaPreferredStartMethod: try container.decodeIfPresent(
+                OllamaStartMethod.self,
+                forKey: .ollamaPreferredStartMethod
+            ) ?? .automatic,
             providers: providers,
             activeProviderID: activeProviderID,
             selectedModelID: try container.decodeIfPresent(String.self, forKey: .selectedModelID),

@@ -82,8 +82,25 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(settings.hasCompletedFirstRunSetup)
         XCTAssertEqual(settings.activeProviderID, ProviderConfiguration.defaultOllamaID)
         XCTAssertEqual(settings.activeProvider.kind, .ollama)
+        XCTAssertFalse(settings.ollamaAutoStartEnabled)
+        XCTAssertFalse(settings.ollamaStopAppOwnedServerOnQuit)
+        XCTAssertEqual(settings.ollamaPreferredStartMethod, .automatic)
         XCTAssertFalse(settings.localExecution.isEnabled)
         XCTAssertFalse(settings.localExecution.hasAcceptedRiskWarning)
+    }
+
+    func testOllamaRuntimeSettingsRoundTripThroughSettingsJSON() throws {
+        var settings = AppSettings()
+        settings.ollamaAutoStartEnabled = true
+        settings.ollamaStopAppOwnedServerOnQuit = true
+        settings.ollamaPreferredStartMethod = .cli
+
+        let data = try JSONEncoder().encode(settings)
+        let decoded = try JSONDecoder().decode(AppSettings.self, from: data)
+
+        XCTAssertTrue(decoded.ollamaAutoStartEnabled)
+        XCTAssertTrue(decoded.ollamaStopAppOwnedServerOnQuit)
+        XCTAssertEqual(decoded.ollamaPreferredStartMethod, .cli)
     }
 
     func testFirstRunSetupCompletedFlagRoundTripsThroughSettingsJSON() throws {

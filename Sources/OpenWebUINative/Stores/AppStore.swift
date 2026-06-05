@@ -38,6 +38,12 @@ final class AppStore: ObservableObject {
     @Published var selectedThreadID: UUID?
     @Published var models: [ProviderModel] = []
     @Published var providerStatus: ProviderStatus = .unknown
+    @Published var ollamaRuntimeStatus: OllamaRuntimeStatus = .notConfigured
+    @Published var ollamaOwnsRunningCLIProcess = false
+    @Published var isStartingOllama = false
+    @Published var isTestingOllamaChat = false
+    @Published var ollamaChatTestResult: String?
+    @Published var latestOllamaChatTestErrorSummary: String?
     @Published var settings: AppSettings = AppSettings()
     @Published var draftPrompt: String = ""
     @Published var composerInlineMessage: String?
@@ -228,6 +234,8 @@ final class AppStore: ObservableObject {
     private let settingsStore: SettingsStore
     private let secretStore: SecretStoring
     private let providerOverride: (any ChatProvider)?
+    private let ollamaRuntimeService: any OllamaRuntimeManaging
+    private let shouldUseOllamaRuntimeService: Bool
     private let exportService: ChatExportService
     private let shareService: any ChatSharing
     private let chatSearchService = ChatSearchService()
@@ -285,6 +293,7 @@ final class AppStore: ObservableObject {
         settingsStore: SettingsStore = SettingsStore(),
         secretStore: SecretStoring = KeychainSecretStore(),
         providerOverride: (any ChatProvider)? = nil,
+        ollamaRuntimeService: (any OllamaRuntimeManaging)? = nil,
         exportService: ChatExportService = ChatExportService(),
         shareService: (any ChatSharing)? = nil,
         documentTextExtractor: any DocumentTextExtracting = DocumentTextExtractionService(),
@@ -373,6 +382,8 @@ final class AppStore: ObservableObject {
         self.settingsStore = settingsStore
         self.secretStore = secretStore
         self.providerOverride = providerOverride
+        self.ollamaRuntimeService = ollamaRuntimeService ?? OllamaRuntimeService()
+        self.shouldUseOllamaRuntimeService = providerOverride == nil || ollamaRuntimeService != nil
         self.exportService = exportService
         self.shareService = shareService ?? ChatShareService()
         self.documentTextExtractor = documentTextExtractor
@@ -667,8 +678,21 @@ final class AppStore: ObservableObject {
             selectedThreadID: selectedThreadID,
             activeStreamingBranchCount: activeStreamingBranchCount,
             latestAutomaticBackupTimestamp: automaticBackups.first?.timestamp,
-            recentErrorSummary: recoveryNotice ?? errorMessage
+            recentErrorSummary: recoveryNotice ?? errorMessage,
+            ollamaRuntimeStatus: ollamaRuntimeStatus,
+            ollamaOwnsRunningCLIProcess: ollamaOwnsRunningCLIProcess,
+            latestOllamaChatTestErrorSummary: latestOllamaChatTestErrorSummary
         )
+    }
+
+    var canCompleteFirstRunSetup: Bool {
+        guard selectedModelID != nil else {
+            return false
+        }
+        if case .available = providerStatus {
+            return true
+        }
+        return false
     }
 
     var appDataPaths: AppDataPaths {
@@ -923,6 +947,10 @@ final class AppStore: ObservableObject {
     }
 
     func completeFirstRunSetup() async {
+        guard canCompleteFirstRunSetup else {
+            errorMessage = "Finish setup needs a reachable provider and selected model. Use Skip Setup to keep safe defaults for later."
+            return
+        }
         settings.hasCompletedFirstRunSetup = true
         do {
             try await settingsStore.save(settings)
@@ -1096,9 +1124,126 @@ final class AppStore: ObservableObject {
             sortThreads()
             try await refreshKnowledgeState()
             selectedThreadID = firstVisibleThreadID()
-            await refreshModels()
+            await prepareActiveProviderForUse()
         } catch {
             errorMessage = error.localizedDescription
+        }
+    }
+
+    private func prepareActiveProviderForUse() async {
+        if activeProvider.kind == .ollama {
+            await refreshOllamaRuntimeStatus()
+            if settings.ollamaAutoStartEnabled, !ollamaRuntimeStatus.isReachable {
+                await startOllama()
+                return
+            }
+        }
+        await refreshModels()
+    }
+
+    func refreshOllamaRuntimeStatus() async {
+        guard activeProvider.kind == .ollama, shouldUseOllamaRuntimeService else {
+            ollamaRuntimeStatus = .notConfigured
+            if shouldUseOllamaRuntimeService {
+                ollamaOwnsRunningCLIProcess = await ollamaRuntimeService.ownsRunningCLIProcess
+            }
+            return
+        }
+
+        let status = await ollamaRuntimeService.status(baseURL: activeProvider.baseURL)
+        ollamaRuntimeStatus = status
+        ollamaOwnsRunningCLIProcess = await ollamaRuntimeService.ownsRunningCLIProcess
+        if !status.isReachable {
+            providerStatus = .unavailable(status.label)
+        }
+    }
+
+    func startOllama() async {
+        guard activeProvider.kind == .ollama else {
+            errorMessage = "Select Ollama before starting the Ollama runtime."
+            return
+        }
+
+        isStartingOllama = true
+        ollamaRuntimeStatus = .starting
+        providerStatus = .checking
+        errorMessage = nil
+        defer {
+            isStartingOllama = false
+        }
+
+        let status = await ollamaRuntimeService.start(
+            baseURL: activeProvider.baseURL,
+            preferredMethod: settings.ollamaPreferredStartMethod
+        )
+        ollamaRuntimeStatus = status
+        ollamaOwnsRunningCLIProcess = await ollamaRuntimeService.ownsRunningCLIProcess
+
+        if status.isReachable {
+            await refreshModels()
+        } else {
+            providerStatus = .unavailable(status.label)
+            errorMessage = status.label
+        }
+    }
+
+    func stopAppOwnedOllamaIfNeeded() async {
+        guard settings.ollamaStopAppOwnedServerOnQuit else {
+            return
+        }
+        await ollamaRuntimeService.stopOwnedCLIProcess()
+        ollamaOwnsRunningCLIProcess = await ollamaRuntimeService.ownsRunningCLIProcess
+    }
+
+    func updateOllamaRuntimeSettings(
+        autoStartEnabled: Bool,
+        stopAppOwnedServerOnQuit: Bool,
+        preferredStartMethod: OllamaStartMethod
+    ) async {
+        settings.ollamaAutoStartEnabled = autoStartEnabled
+        settings.ollamaStopAppOwnedServerOnQuit = stopAppOwnedServerOnQuit
+        settings.ollamaPreferredStartMethod = preferredStartMethod
+        do {
+            try await settingsStore.save(settings)
+            errorMessage = nil
+        } catch {
+            errorMessage = error.localizedDescription
+        }
+    }
+
+    func testOllamaChat() async {
+        guard activeProvider.kind == .ollama else {
+            latestOllamaChatTestErrorSummary = "Select Ollama before testing Ollama chat."
+            ollamaChatTestResult = nil
+            errorMessage = latestOllamaChatTestErrorSummary
+            return
+        }
+
+        isTestingOllamaChat = true
+        ollamaChatTestResult = nil
+        latestOllamaChatTestErrorSummary = nil
+        errorMessage = nil
+        defer {
+            isTestingOllamaChat = false
+        }
+
+        do {
+            let diagnosticClient = try makeOllamaDiagnosticClient()
+            _ = try await diagnosticClient.runtimeVersion()
+            let fetchedModels = try await diagnosticClient.listModels()
+            let selectedModelID = settings.selectedModelID ?? settings.selectedModelIDs.first
+            guard let selectedModelID, !selectedModelID.isEmpty else {
+                throw ProviderError.noModelSelected
+            }
+            guard fetchedModels.contains(where: { $0.id == selectedModelID }) else {
+                throw ProviderError.selectedModelUnavailable(selectedModelID)
+            }
+            let reply = try await diagnosticClient.runDiagnosticChat(model: selectedModelID)
+            ollamaChatTestResult = "Ollama chat test succeeded: \(reply)"
+        } catch {
+            let message = ProviderErrorPresentation.presentation(for: error, provider: activeProvider).message
+            latestOllamaChatTestErrorSummary = message
+            errorMessage = message
         }
     }
 
@@ -1145,12 +1290,22 @@ final class AppStore: ObservableObject {
             providerStatus = .available("\(provider.configuration.name) connected (\(models.count) models)")
         } catch {
             models = await modelsIncludingActivePipeFunctions([])
+            if activeProvider.kind == .ollama,
+               newOllamaModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                newOllamaModelName = "gemma3"
+            }
             providerStatus = .unavailable(providerErrorMessage(for: error))
         }
     }
 
     func checkActiveProviderHealth() async {
         providerStatus = .checking
+        if activeProvider.kind == .ollama, shouldUseOllamaRuntimeService {
+            await refreshOllamaRuntimeStatus()
+            guard ollamaRuntimeStatus.isReachable else {
+                return
+            }
+        }
         do {
             let provider = try makeActiveProvider()
             providerStatus = await provider.healthCheck()
@@ -1171,7 +1326,7 @@ final class AppStore: ObservableObject {
         settings.embeddingModelID = nil
         do {
             try await settingsStore.save(settings)
-            await refreshModels()
+            await prepareActiveProviderForUse()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -1237,8 +1392,11 @@ final class AppStore: ObservableObject {
             }
             newOllamaModelName = ""
             await refreshModels()
+            if models.contains(where: { $0.id == modelName }) {
+                await selectModel(modelName)
+            }
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = providerErrorMessage(for: error)
         }
 
         isPullingModel = false
@@ -1262,7 +1420,7 @@ final class AppStore: ObservableObject {
             try await manager.deleteModel(named: modelID)
             await refreshModels()
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = providerErrorMessage(for: error)
         }
 
         isDeletingModel = false
@@ -1289,7 +1447,7 @@ final class AppStore: ObservableObject {
                     "baseURL": trimmedBaseURL
                 ]
             )
-            await refreshModels()
+            await prepareActiveProviderForUse()
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -9841,6 +9999,9 @@ final class AppStore: ObservableObject {
             setComposerError(ProviderError.noModelSelected.localizedDescription)
             return false
         }
+        guard preflightSelectedModelsForSend(modelIDs) else {
+            return false
+        }
 
         if selectedThreadID == nil {
             createThread()
@@ -9938,6 +10099,43 @@ final class AppStore: ObservableObject {
         cancelledSendIDs.remove(sendID)
         await persistThread(id: targetThreadID)
         return didAppendMessages
+    }
+
+    private func preflightSelectedModelsForSend(_ modelIDs: [String]) -> Bool {
+        guard activeProvider.kind == .ollama else {
+            return true
+        }
+        if let providerOverride, providerOverride.configuration.kind != .ollama {
+            return true
+        }
+
+        let ollamaModelIDs = modelIDs.filter { pipeFunction(for: $0) == nil }
+        guard !ollamaModelIDs.isEmpty else {
+            return true
+        }
+
+        if case .unavailable(let message) = providerStatus {
+            setComposerError(message)
+            return false
+        }
+
+        let availableModelIDs = Set(models.map(\.id))
+        guard !availableModelIDs.isEmpty else {
+            setComposerError(modelEmptyStateMessage ?? "No Ollama models are installed.")
+            return false
+        }
+
+        for modelID in ollamaModelIDs where !availableModelIDs.contains(modelID) {
+            setComposerError(
+                ProviderErrorPresentation.presentation(
+                    for: ProviderError.selectedModelUnavailable(modelID),
+                    provider: activeProvider
+                ).message
+            )
+            return false
+        }
+
+        return true
     }
 
     private func setComposerError(_ message: String) {
@@ -11183,6 +11381,16 @@ final class AppStore: ObservableObject {
         }
         if let manager = providerOverride as? any OllamaModelManaging {
             return manager
+        }
+        guard let baseURL = URL(string: activeProvider.baseURL), baseURL.scheme != nil else {
+            throw ProviderError.invalidBaseURL(activeProvider.baseURL)
+        }
+        return OllamaClient(baseURL: baseURL, configuration: activeProvider)
+    }
+
+    private func makeOllamaDiagnosticClient() throws -> any OllamaChatDiagnosing {
+        if let diagnosticClient = providerOverride as? any OllamaChatDiagnosing {
+            return diagnosticClient
         }
         guard let baseURL = URL(string: activeProvider.baseURL), baseURL.scheme != nil else {
             throw ProviderError.invalidBaseURL(activeProvider.baseURL)

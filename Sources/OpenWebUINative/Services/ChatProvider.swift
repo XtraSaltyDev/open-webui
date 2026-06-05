@@ -31,6 +31,14 @@ protocol ChatProvider {
     func synthesizeSpeech(request: SpeechSynthesisRequest) async throws -> SpeechSynthesisResult
 }
 
+protocol OllamaChatDiagnosing {
+    var configuration: ProviderConfiguration { get }
+
+    func runtimeVersion() async throws -> String
+    func listModels() async throws -> [ProviderModel]
+    func runDiagnosticChat(model: String) async throws -> String
+}
+
 extension ChatProvider {
     var capabilities: ProviderCapabilities {
         configuration.capabilities

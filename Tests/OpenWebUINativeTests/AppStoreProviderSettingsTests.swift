@@ -105,6 +105,97 @@ final class AppStoreProviderSettingsTests: XCTestCase {
         XCTAssertNil(store.settings.embeddingModelID)
     }
 
+    func testSelectingOllamaChecksRuntimeAndRefreshesModels() async throws {
+        let fixture = try ProviderSettingsFixture()
+        let providerID = UUID()
+        let gateway = ProviderConfiguration(
+            id: providerID,
+            name: "Gateway",
+            kind: .openAICompatible,
+            baseURL: "https://gateway.example/v1",
+            apiKeySecretID: "secret"
+        )
+        let settings = AppSettings(
+            providers: [
+                ProviderConfiguration.defaultOllama(),
+                gateway
+            ],
+            activeProviderID: providerID
+        )
+        try await fixture.settingsStore.save(settings)
+        let runtimeService = FakeOllamaRuntimeService(status: .reachable(version: "0.12.6"))
+        let provider = OllamaSettingsProvider(models: [
+            ProviderModel(
+                id: "llama3.2",
+                name: "llama3.2",
+                provider: .ollama,
+                providerID: ProviderConfiguration.defaultOllamaID
+            )
+        ])
+        let store = fixture.makeStore(
+            secretStore: InMemorySecretStore(),
+            provider: provider,
+            ollamaRuntimeService: runtimeService
+        )
+        store.settings = try await fixture.settingsStore.load()
+
+        await store.selectProvider(ProviderConfiguration.defaultOllamaID)
+        let statusCallCount = await runtimeService.statusCallCount
+        let startCallCount = await runtimeService.startCallCount
+
+        XCTAssertEqual(statusCallCount, 1)
+        XCTAssertEqual(startCallCount, 0)
+        XCTAssertEqual(store.ollamaRuntimeStatus, .reachable(version: "0.12.6"))
+        XCTAssertEqual(store.models.map(\.id), ["llama3.2"])
+        XCTAssertEqual(store.settings.selectedModelID, "llama3.2")
+    }
+
+    func testLoadDoesNotAutoStartOllamaWhenAutoStartDisabled() async throws {
+        let fixture = try ProviderSettingsFixture()
+        var settings = AppSettings()
+        settings.ollamaAutoStartEnabled = false
+        try await fixture.settingsStore.save(settings)
+        let runtimeService = FakeOllamaRuntimeService(status: .unreachable(reason: "Ollama is not reachable at http://localhost:11434."))
+        let store = fixture.makeStore(
+            secretStore: InMemorySecretStore(),
+            provider: OllamaSettingsProvider(models: []),
+            ollamaRuntimeService: runtimeService
+        )
+
+        await store.load()
+        let statusCallCount = await runtimeService.statusCallCount
+        let startCallCount = await runtimeService.startCallCount
+
+        XCTAssertEqual(statusCallCount, 1)
+        XCTAssertEqual(startCallCount, 0)
+        XCTAssertEqual(store.ollamaRuntimeStatus, .unreachable(reason: "Ollama is not reachable at http://localhost:11434."))
+    }
+
+    func testLoadAutoStartsOllamaWhenEnabledAndUnreachable() async throws {
+        let fixture = try ProviderSettingsFixture()
+        var settings = AppSettings()
+        settings.ollamaAutoStartEnabled = true
+        try await fixture.settingsStore.save(settings)
+        let runtimeService = FakeOllamaRuntimeService(
+            status: .unreachable(reason: "Ollama is not reachable at http://localhost:11434."),
+            startStatus: .startedByApp(version: "0.12.6")
+        )
+        let store = fixture.makeStore(
+            secretStore: InMemorySecretStore(),
+            provider: OllamaSettingsProvider(models: [
+                ProviderModel(id: "llama3.2", name: "llama3.2", provider: .ollama, providerID: ProviderConfiguration.defaultOllamaID)
+            ]),
+            ollamaRuntimeService: runtimeService
+        )
+
+        await store.load()
+        let startCallCount = await runtimeService.startCallCount
+
+        XCTAssertEqual(startCallCount, 1)
+        XCTAssertEqual(store.ollamaRuntimeStatus, .startedByApp(version: "0.12.6"))
+        XCTAssertEqual(store.models.map(\.id), ["llama3.2"])
+    }
+
     func testRemoveOpenAICompatibleProviderDeletesSecretFallsBackToOllamaAndClearsSelections() async throws {
         let fixture = try ProviderSettingsFixture()
         let secretStore = InMemorySecretStore()
@@ -379,12 +470,32 @@ final class AppStoreProviderSettingsTests: XCTestCase {
         let fixture = try ProviderSettingsFixture()
         let store = fixture.makeStore(secretStore: InMemorySecretStore())
         await store.load()
+        store.providerStatus = .available("Ollama connected")
+        store.models = [
+            ProviderModel(id: "llama3.2", name: "llama3.2", provider: .ollama, providerID: ProviderConfiguration.defaultOllamaID)
+        ]
+        store.settings.selectedModelID = "llama3.2"
+        store.settings.selectedModelIDs = ["llama3.2"]
 
         await store.completeFirstRunSetup()
 
         XCTAssertTrue(store.settings.hasCompletedFirstRunSetup)
         let savedSettings = try await fixture.settingsStore.load()
         XCTAssertTrue(savedSettings.hasCompletedFirstRunSetup)
+    }
+
+    func testCompleteFirstRunSetupRequiresReachableProviderAndSelectedModel() async throws {
+        let fixture = try ProviderSettingsFixture()
+        let store = fixture.makeStore(secretStore: InMemorySecretStore())
+        store.providerStatus = .unavailable("Ollama is not reachable at http://localhost:11434.")
+        store.models = []
+        store.settings.selectedModelID = nil
+        store.settings.selectedModelIDs = []
+
+        await store.completeFirstRunSetup()
+
+        XCTAssertFalse(store.settings.hasCompletedFirstRunSetup)
+        XCTAssertEqual(store.errorMessage, "Finish setup needs a reachable provider and selected model. Use Skip Setup to keep safe defaults for later.")
     }
 
     func testSkipFirstRunSetupLeavesSafeDefaultsAndPersistsCompletedFlag() async throws {
@@ -480,6 +591,48 @@ final class AppStoreProviderSettingsTests: XCTestCase {
             .unavailable("Gateway needs an API key. Add it in Settings; it will be stored in Keychain.")
         )
     }
+
+    func testTestOllamaChatDoesNotCreateOrPersistChatThread() async throws {
+        let fixture = try ProviderSettingsFixture()
+        let provider = OllamaSettingsProvider(
+            models: [
+                ProviderModel(id: "llama3.2", name: "llama3.2", provider: .ollama, providerID: ProviderConfiguration.defaultOllamaID)
+            ],
+            diagnosticReply: "OK"
+        )
+        let store = fixture.makeStore(secretStore: InMemorySecretStore(), provider: provider)
+        store.models = try await provider.listModels()
+        store.settings.selectedModelID = "llama3.2"
+        store.settings.selectedModelIDs = ["llama3.2"]
+
+        await store.testOllamaChat()
+        let persistedThreads = try await fixture.storage.loadThreads()
+
+        XCTAssertEqual(store.ollamaChatTestResult, "Ollama chat test succeeded: OK")
+        XCTAssertTrue(store.threads.isEmpty)
+        XCTAssertTrue(persistedThreads.isEmpty)
+    }
+
+    func testFailedOllamaPreflightPreservesDraftAndDoesNotCreateThread() async throws {
+        let fixture = try ProviderSettingsFixture()
+        let store = fixture.makeStore(secretStore: InMemorySecretStore(), provider: OllamaSettingsProvider(models: []))
+        store.models = [
+            ProviderModel(id: "llama3.2", name: "llama3.2", provider: .ollama, providerID: ProviderConfiguration.defaultOllamaID)
+        ]
+        store.settings.selectedModelID = "missing-model"
+        store.settings.selectedModelIDs = ["missing-model"]
+        store.draftPrompt = "hello from draft"
+
+        let didSend = await store.sendDraftPrompt()
+
+        XCTAssertFalse(didSend)
+        XCTAssertEqual(store.draftPrompt, "hello from draft")
+        XCTAssertTrue(store.threads.isEmpty)
+        XCTAssertEqual(
+            store.composerInlineMessage,
+            "Selected Ollama model 'missing-model' is not installed. Pull it or choose another model."
+        )
+    }
 }
 
 private struct ProviderSettingsFixture {
@@ -504,13 +657,18 @@ private struct ProviderSettingsFixture {
     }
 
     @MainActor
-    func makeStore(secretStore: SecretStoring, provider: (any ChatProvider)? = nil) -> AppStore {
+    func makeStore(
+        secretStore: SecretStoring,
+        provider: (any ChatProvider)? = nil,
+        ollamaRuntimeService: (any OllamaRuntimeManaging)? = nil
+    ) -> AppStore {
         AppStore(
             storage: storage,
             folderStorage: folderStorage,
             settingsStore: settingsStore,
             secretStore: secretStore,
             providerOverride: provider,
+            ollamaRuntimeService: ollamaRuntimeService,
             auditLogStorage: auditStorage,
             promptStorage: promptStorage,
             noteStorage: noteStorage
@@ -554,5 +712,75 @@ private actor HealthCheckProvider: ChatProvider {
 
     func createEmbeddings(model: String, input: [String]) async throws -> [[Double]] {
         input.map { _ in [1.0] }
+    }
+}
+
+private actor FakeOllamaRuntimeService: OllamaRuntimeManaging {
+    private let status: OllamaRuntimeStatus
+    private let startStatus: OllamaRuntimeStatus
+    private(set) var statusCallCount = 0
+    private(set) var startCallCount = 0
+    private(set) var stopCallCount = 0
+    var ownsRunningCLIProcess = false
+
+    init(
+        status: OllamaRuntimeStatus,
+        startStatus: OllamaRuntimeStatus = .failedToStart(reason: "Start not configured.")
+    ) {
+        self.status = status
+        self.startStatus = startStatus
+    }
+
+    func status(baseURL: String) async -> OllamaRuntimeStatus {
+        statusCallCount += 1
+        return status
+    }
+
+    func start(baseURL: String, preferredMethod: OllamaStartMethod) async -> OllamaRuntimeStatus {
+        startCallCount += 1
+        return startStatus
+    }
+
+    func stopOwnedCLIProcess() async {
+        stopCallCount += 1
+        ownsRunningCLIProcess = false
+    }
+}
+
+private actor OllamaSettingsProvider: ChatProvider, OllamaChatDiagnosing {
+    nonisolated let configuration = ProviderConfiguration.defaultOllama()
+    private let models: [ProviderModel]
+    private let diagnosticReply: String
+
+    init(models: [ProviderModel], diagnosticReply: String = "OK") {
+        self.models = models
+        self.diagnosticReply = diagnosticReply
+    }
+
+    func listModels() async throws -> [ProviderModel] {
+        models
+    }
+
+    func healthCheck() async -> ProviderStatus {
+        .available("Ollama connected")
+    }
+
+    func runtimeVersion() async throws -> String {
+        "0.12.6"
+    }
+
+    func runDiagnosticChat(model: String) async throws -> String {
+        diagnosticReply
+    }
+
+    nonisolated func streamChat(model: String, messages: [ProviderChatMessage]) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            continuation.yield("Hello")
+            continuation.finish()
+        }
+    }
+
+    func createEmbeddings(model: String, input: [String]) async throws -> [[Double]] {
+        []
     }
 }

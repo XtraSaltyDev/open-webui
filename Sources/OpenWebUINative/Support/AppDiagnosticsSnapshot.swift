@@ -34,6 +34,17 @@ struct AppDiagnosticsSnapshot: Equatable, Sendable {
     var activeProviderKind: String
     var activeProviderBaseURL: String
     var providerHealthStatus: String
+    var ollamaBaseURL: String
+    var ollamaRuntimeStatus: String
+    var ollamaVersion: String?
+    var ollamaModelCount: Int
+    var selectedOllamaModelID: String?
+    var ollamaAutoStartEnabled: Bool
+    var ollamaStopAppOwnedServerOnQuit: Bool
+    var ollamaPreferredStartMethod: String
+    var ollamaOwnsRunningCLIProcess: Bool
+    var latestOllamaHealthError: String?
+    var latestOllamaChatTestErrorSummary: String?
     var modelCount: Int
     var selectedModelIDs: [String]
     var selectedEmbeddingModelID: String?
@@ -61,6 +72,12 @@ struct AppDiagnosticsSnapshot: Equatable, Sendable {
             activeProviderKind,
             activeProviderBaseURL,
             providerHealthStatus,
+            ollamaBaseURL,
+            ollamaRuntimeStatus,
+            ollamaVersion ?? "",
+            selectedOllamaModelID ?? "",
+            latestOllamaHealthError ?? "",
+            latestOllamaChatTestErrorSummary ?? "",
             selectedModelIDs.joined(separator: " "),
             selectedEmbeddingModelID ?? "",
             selectedThreadID?.uuidString ?? "",
@@ -83,6 +100,9 @@ struct AppDiagnosticsSnapshot: Equatable, Sendable {
         activeStreamingBranchCount: Int = 0,
         latestAutomaticBackupTimestamp: Date?,
         recentErrorSummary: String?,
+        ollamaRuntimeStatus: OllamaRuntimeStatus = .notConfigured,
+        ollamaOwnsRunningCLIProcess: Bool = false,
+        latestOllamaChatTestErrorSummary: String? = nil,
         bundle: Bundle = .main
     ) -> AppDiagnosticsSnapshot {
         let selectedThread = selectedThreadID.flatMap { id in
@@ -92,6 +112,14 @@ struct AppDiagnosticsSnapshot: Equatable, Sendable {
         let modelSelectionSummary = selectedModelIDs.isEmpty
             ? "No model selected"
             : selectedModelIDs.joined(separator: ", ")
+        let ollamaModels = models.filter { $0.provider == .ollama || $0.providerID == ProviderConfiguration.defaultOllamaID }
+        let latestOllamaHealthError: String?
+        switch ollamaRuntimeStatus {
+        case .unreachable(let reason), .failedToStart(let reason):
+            latestOllamaHealthError = reason
+        case .notConfigured, .reachable, .starting, .startedByApp:
+            latestOllamaHealthError = nil
+        }
 
         return AppDiagnosticsSnapshot(
             appVersion: bundle.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unavailable",
@@ -104,6 +132,17 @@ struct AppDiagnosticsSnapshot: Equatable, Sendable {
             activeProviderKind: providerKindLabel(settings.activeProvider.kind),
             activeProviderBaseURL: settings.activeProvider.baseURL,
             providerHealthStatus: providerStatus.label,
+            ollamaBaseURL: settings.ollamaBaseURL,
+            ollamaRuntimeStatus: ollamaRuntimeStatus.label,
+            ollamaVersion: ollamaRuntimeStatus.version,
+            ollamaModelCount: ollamaModels.count,
+            selectedOllamaModelID: settings.activeProvider.kind == .ollama ? settings.selectedModelID : nil,
+            ollamaAutoStartEnabled: settings.ollamaAutoStartEnabled,
+            ollamaStopAppOwnedServerOnQuit: settings.ollamaStopAppOwnedServerOnQuit,
+            ollamaPreferredStartMethod: settings.ollamaPreferredStartMethod.label,
+            ollamaOwnsRunningCLIProcess: ollamaOwnsRunningCLIProcess,
+            latestOllamaHealthError: latestOllamaHealthError,
+            latestOllamaChatTestErrorSummary: latestOllamaChatTestErrorSummary,
             modelCount: models.count,
             selectedModelIDs: selectedModelIDs,
             selectedEmbeddingModelID: settings.embeddingModelID,

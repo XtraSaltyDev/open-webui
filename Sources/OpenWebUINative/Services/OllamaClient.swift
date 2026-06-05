@@ -3,7 +3,8 @@ import Foundation
 enum ProviderError: Error, LocalizedError, Equatable {
     case invalidBaseURL(String)
     case invalidResponse
-    case httpStatus(Int)
+    case httpStatus(Int, message: String? = nil, bodySnippet: String? = nil, endpoint: String? = nil)
+    case malformedStreamLine(endpoint: String, lineSnippet: String)
     case missingAPIKey(String)
     case noModelsReturned(String)
     case selectedModelUnavailable(String)
@@ -26,8 +27,12 @@ enum ProviderError: Error, LocalizedError, Equatable {
             return "Invalid provider URL: \(value)"
         case .invalidResponse:
             return "The provider returned an invalid response."
-        case .httpStatus(let statusCode):
-            return "The provider returned HTTP \(statusCode)."
+        case .httpStatus(let statusCode, let message, _, let endpoint):
+            let endpointText = endpoint.map { " from \($0)" } ?? ""
+            let messageText = message.map { ": \($0)" } ?? "."
+            return "The provider returned HTTP \(statusCode)\(endpointText)\(messageText)"
+        case .malformedStreamLine(let endpoint, let lineSnippet):
+            return "The provider returned malformed streaming JSON from \(endpoint): \(lineSnippet)"
         case .missingAPIKey(let providerName):
             return "Add an API key for \(providerName) before connecting."
         case .noModelsReturned(let providerName):
@@ -88,7 +93,7 @@ struct OllamaClient {
         request.httpMethod = "GET"
 
         let (data, response) = try await dataLoader(request)
-        try Self.validate(response)
+        try Self.validate(response, data: data, endpoint: request.url?.path)
 
         let payload = try JSONDecoder().decode(OllamaTagsResponse.self, from: data)
         return payload.models.map { model in
@@ -107,7 +112,7 @@ struct OllamaClient {
         request.httpMethod = "GET"
 
         let (data, response) = try await dataLoader(request)
-        try Self.validate(response)
+        try Self.validate(response, data: data, endpoint: request.url?.path)
 
         let payload = try JSONDecoder().decode(OllamaVersionResponse.self, from: data)
         return payload.version
@@ -118,7 +123,7 @@ struct OllamaClient {
         request.httpMethod = "GET"
 
         let (data, response) = try await dataLoader(request)
-        try Self.validate(response)
+        try Self.validate(response, data: data, endpoint: request.url?.path)
 
         let payload = try JSONDecoder().decode(OllamaRunningModelsResponse.self, from: data)
         return payload.models.count
@@ -138,6 +143,30 @@ struct OllamaClient {
         } catch {
             return .unavailable(ProviderErrorPresentation.presentation(for: error, provider: configuration).message)
         }
+    }
+
+    func runDiagnosticChat(model: String) async throws -> String {
+        var request = URLRequest(url: endpoint("/api/chat"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(
+            OllamaChatRequest(
+                model: model,
+                messages: [OllamaChatMessage(role: "user", content: "Reply with OK.")],
+                stream: false,
+                options: nil
+            )
+        )
+
+        let (data, response) = try await dataLoader(request)
+        try Self.validate(response, data: data, endpoint: request.url?.path)
+
+        let payload = try JSONDecoder().decode(OllamaChatResponse.self, from: data)
+        guard let content = payload.message?.content.trimmingCharacters(in: .whitespacesAndNewlines),
+              !content.isEmpty else {
+            throw ProviderError.invalidResponse
+        }
+        return content
     }
 
     func streamChat(model: String, messages: [ProviderChatMessage]) -> AsyncThrowingStream<String, Error> {
@@ -180,7 +209,7 @@ struct OllamaClient {
                     request.httpMethod = "POST"
                     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
                     request.httpBody = try JSONEncoder().encode(
-                        OllamaChatRequest(model: model, messages: messages, stream: true, options: options)
+                        OllamaChatRequest(model: model, messages: messages.ollamaSanitized(), stream: true, options: options)
                     )
 
                     let lines = try await lineStreamLoader(request)
@@ -189,7 +218,15 @@ struct OllamaClient {
                             continue
                         }
                         let data = Data(line.utf8)
-                        let event = try JSONDecoder().decode(OllamaChatStreamEvent.self, from: data)
+                        let event: OllamaChatStreamEvent
+                        do {
+                            event = try JSONDecoder().decode(OllamaChatStreamEvent.self, from: data)
+                        } catch {
+                            throw ProviderError.malformedStreamLine(
+                                endpoint: request.url?.path ?? "/api/chat",
+                                lineSnippet: Self.cappedSnippet(line)
+                            )
+                        }
                         if let content = event.message?.content, !content.isEmpty {
                             continuation.yield(.content(content))
                         }
@@ -284,8 +321,8 @@ struct OllamaClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.httpBody = try JSONEncoder().encode(OllamaModelNameRequest(model: name, stream: nil))
 
-        let (_, response) = try await dataLoader(request)
-        try Self.validate(response)
+        let (data, response) = try await dataLoader(request)
+        try Self.validate(response, data: data, endpoint: request.url?.path)
     }
 
     private func endpoint(_ path: String) -> URL {
@@ -298,7 +335,16 @@ struct OllamaClient {
 
     private static let defaultLineStreamLoader: LineStreamLoader = { request in
         let (bytes, response) = try await URLSession.shared.bytes(for: request)
-        try validate(response)
+        if let httpResponse = response as? HTTPURLResponse,
+           !(200..<300).contains(httpResponse.statusCode) {
+            let bodySnippet = try await cappedSnippet(from: bytes.lines)
+            throw httpStatusError(
+                statusCode: httpResponse.statusCode,
+                bodySnippet: bodySnippet,
+                endpoint: request.url?.path
+            )
+        }
+        try validate(response, data: Data(), endpoint: request.url?.path)
 
         return AsyncThrowingStream { continuation in
             let task = Task {
@@ -317,13 +363,71 @@ struct OllamaClient {
         }
     }
 
-    private static func validate(_ response: URLResponse) throws {
+    private static func validate(_ response: URLResponse, data: Data, endpoint: String?) throws {
         guard let httpResponse = response as? HTTPURLResponse else {
             throw ProviderError.invalidResponse
         }
         guard (200..<300).contains(httpResponse.statusCode) else {
-            throw ProviderError.httpStatus(httpResponse.statusCode)
+            throw httpStatusError(
+                statusCode: httpResponse.statusCode,
+                bodySnippet: String(data: data, encoding: .utf8).map { cappedSnippet($0) },
+                endpoint: endpoint
+            )
         }
+    }
+
+    private static func httpStatusError(
+        statusCode: Int,
+        bodySnippet: String?,
+        endpoint: String?
+    ) -> ProviderError {
+        ProviderError.httpStatus(
+            statusCode,
+            message: extractedErrorMessage(from: bodySnippet),
+            bodySnippet: bodySnippet,
+            endpoint: endpoint
+        )
+    }
+
+    private static func extractedErrorMessage(from bodySnippet: String?) -> String? {
+        guard let bodySnippet, !bodySnippet.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return nil
+        }
+        if let data = bodySnippet.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            for key in ["error", "message", "detail"] {
+                if let value = object[key] as? String,
+                   !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return cappedSnippet(value)
+                }
+            }
+        }
+        return cappedSnippet(bodySnippet)
+    }
+
+    fileprivate static func cappedSnippet(_ text: String, maxCharacters: Int = 1_000) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.count > maxCharacters else {
+            return trimmed
+        }
+        return String(trimmed.prefix(maxCharacters))
+    }
+
+    private static func cappedSnippet(
+        from lines: AsyncLineSequence<URLSession.AsyncBytes>,
+        maxCharacters: Int = 1_000
+    ) async throws -> String {
+        var captured = ""
+        for try await line in lines {
+            if !captured.isEmpty {
+                captured += "\n"
+            }
+            captured += line
+            if captured.count >= maxCharacters {
+                break
+            }
+        }
+        return cappedSnippet(captured, maxCharacters: maxCharacters)
     }
 }
 
@@ -332,6 +436,8 @@ extension OllamaClient: ChatProvider {
         throw ProviderError.invalidResponse
     }
 }
+
+extension OllamaClient: OllamaChatDiagnosing {}
 
 extension OllamaClient: OllamaModelManaging {}
 
@@ -358,7 +464,7 @@ private struct OllamaRunningModel: Decodable {
 
 private struct OllamaChatRequest: Encodable {
     var model: String
-    var messages: [ProviderChatMessage]
+    var messages: [OllamaChatMessage]
     var stream: Bool
     var options: ProviderChatOptions?
 
@@ -375,6 +481,46 @@ private struct OllamaChatRequest: Encodable {
         try container.encode(messages, forKey: .messages)
         try container.encode(stream, forKey: .stream)
         try container.encodeIfPresent(options?.ollamaOptions, forKey: .options)
+    }
+}
+
+private struct OllamaChatMessage: Encodable {
+    var role: String
+    var content: String
+}
+
+private struct OllamaChatResponse: Decodable {
+    var message: OllamaStreamMessage?
+    var done: Bool?
+}
+
+private extension Array where Element == ProviderChatMessage {
+    func ollamaSanitized() throws -> [OllamaChatMessage] {
+        let messages = compactMap { message -> OllamaChatMessage? in
+            let content = message.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !content.isEmpty else {
+                return nil
+            }
+
+            let normalizedRole: String
+            switch message.role.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+            case ChatRole.system.rawValue:
+                normalizedRole = ChatRole.system.rawValue
+            case ChatRole.assistant.rawValue:
+                normalizedRole = ChatRole.assistant.rawValue
+            case ChatRole.user.rawValue:
+                normalizedRole = ChatRole.user.rawValue
+            default:
+                normalizedRole = ChatRole.user.rawValue
+            }
+
+            return OllamaChatMessage(role: normalizedRole, content: content)
+        }
+
+        guard !messages.isEmpty else {
+            throw ProviderError.emptyPrompt
+        }
+        return messages
     }
 }
 

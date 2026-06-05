@@ -25,6 +25,29 @@ struct FirstRunSetupView: View {
                     if providerKind == .ollama {
                         TextField("Base URL", text: $ollamaBaseURL)
                             .textFieldStyle(.roundedBorder)
+                        LabeledContent("Runtime") {
+                            Text(store.ollamaRuntimeStatus.label)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled)
+                        }
+                        HStack {
+                            Button("Start Ollama") {
+                                Task {
+                                    await store.startOllama()
+                                }
+                            }
+                            .disabled(store.isStartingOllama)
+
+                            Button("Recheck") {
+                                Task {
+                                    await store.refreshOllamaRuntimeStatus()
+                                    if store.ollamaRuntimeStatus.isReachable {
+                                        await store.refreshModels()
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         TextField("Name", text: $openAIProviderName)
                             .textFieldStyle(.roundedBorder)
@@ -72,6 +95,20 @@ struct FirstRunSetupView: View {
                         }
                     }
                     .disabled(store.models.isEmpty)
+
+                    if providerKind == .ollama, store.models.isEmpty {
+                        HStack {
+                            TextField("Pull model", text: $store.newOllamaModelName)
+                                .textFieldStyle(.roundedBorder)
+
+                            Button("Pull") {
+                                Task {
+                                    await store.pullOllamaModel()
+                                }
+                            }
+                            .disabled(store.isPullingModel || store.newOllamaModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                        }
+                    }
                 }
 
                 Section("Local Data") {
@@ -102,9 +139,12 @@ struct FirstRunSetupView: View {
                 Button("Finish Setup") {
                     Task {
                         await store.completeFirstRunSetup()
-                        dismiss()
+                        if store.settings.hasCompletedFirstRunSetup {
+                            dismiss()
+                        }
                     }
                 }
+                .disabled(!store.canCompleteFirstRunSetup)
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -142,6 +182,7 @@ struct FirstRunSetupView: View {
         switch providerKind {
         case .ollama:
             await store.updateOllamaBaseURL(ollamaBaseURL)
+            await store.refreshOllamaRuntimeStatus()
         case .openAICompatible:
             await store.saveOpenAICompatibleProvider(
                 name: openAIProviderName,

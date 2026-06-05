@@ -92,6 +92,37 @@ final class ProviderErrorPresentationTests: XCTestCase {
         XCTAssertTrue(httpPresentation.technicalDetail.contains("HTTP 401"))
     }
 
+    func testOllamaHTTPErrorMessageIncludesEndpointAndSafeBodyMessage() {
+        let presentation = ProviderErrorPresentation.presentation(
+            for: ProviderError.httpStatus(
+                500,
+                message: "model requires more system memory",
+                bodySnippet: #"{"error":"model requires more system memory"}"#,
+                endpoint: "/api/chat"
+            ),
+            provider: ProviderConfiguration.defaultOllama()
+        )
+
+        XCTAssertEqual(
+            presentation.message,
+            "Ollama returned HTTP 500 from /api/chat: model requires more system memory"
+        )
+        XCTAssertTrue(presentation.technicalDetail.contains("HTTP 500"))
+        XCTAssertTrue(presentation.technicalDetail.contains("/api/chat"))
+    }
+
+    func testOllamaSelectedModelUnavailableMessageIsInstallFocused() {
+        let presentation = ProviderErrorPresentation.presentation(
+            for: ProviderError.selectedModelUnavailable("missing-model"),
+            provider: ProviderConfiguration.defaultOllama()
+        )
+
+        XCTAssertEqual(
+            presentation.message,
+            "Selected Ollama model 'missing-model' is not installed. Pull it or choose another model."
+        )
+    }
+
     func testCancelledStreamMessageIsNonScary() {
         let presentation = ProviderErrorPresentation.presentation(
             for: CancellationError(),

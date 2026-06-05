@@ -76,6 +76,84 @@ final class OllamaClientTests: XCTestCase {
         XCTAssertEqual(status, .available("Ollama 0.12.6 connected (2 models, 1 running)"))
     }
 
+    func testRuntimeVersionCallsVersionEndpoint() async throws {
+        var capturedRequest: URLRequest?
+        let client = OllamaClient(
+            baseURL: URL(string: "http://localhost:11434")!,
+            dataLoader: { request in
+                capturedRequest = request
+                return (#"{"version":"0.12.6"}"#.data(using: .utf8)!, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            },
+            lineStreamLoader: { _ in
+                AsyncThrowingStream { continuation in
+                    continuation.finish()
+                }
+            }
+        )
+
+        let version = try await client.runtimeVersion()
+
+        XCTAssertEqual(version, "0.12.6")
+        XCTAssertEqual(capturedRequest?.url?.path, "/api/version")
+        XCTAssertEqual(capturedRequest?.httpMethod, "GET")
+    }
+
+    func testHTTPErrorCapturesOllamaJSONErrorMessageAndEndpoint() async throws {
+        let client = OllamaClient(
+            baseURL: URL(string: "http://localhost:11434")!,
+            dataLoader: { request in
+                let data = #"{"error":"model requires more system memory"}"#.data(using: .utf8)!
+                return (data, HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!)
+            },
+            lineStreamLoader: { _ in
+                AsyncThrowingStream { continuation in
+                    continuation.finish()
+                }
+            }
+        )
+
+        do {
+            _ = try await client.runtimeVersion()
+            XCTFail("Expected HTTP error")
+        } catch let error as ProviderError {
+            XCTAssertEqual(
+                error,
+                ProviderError.httpStatus(
+                    500,
+                    message: "model requires more system memory",
+                    bodySnippet: #"{"error":"model requires more system memory"}"#,
+                    endpoint: "/api/version"
+                )
+            )
+        }
+    }
+
+    func testHTTPErrorBodySnippetIsCapped() async throws {
+        let oversizedBody = String(repeating: "x", count: 1_200)
+        let client = OllamaClient(
+            baseURL: URL(string: "http://localhost:11434")!,
+            dataLoader: { request in
+                (Data(oversizedBody.utf8), HTTPURLResponse(url: request.url!, statusCode: 500, httpVersion: nil, headerFields: nil)!)
+            },
+            lineStreamLoader: { _ in
+                AsyncThrowingStream { continuation in
+                    continuation.finish()
+                }
+            }
+        )
+
+        do {
+            _ = try await client.runtimeVersion()
+            XCTFail("Expected HTTP error")
+        } catch let error as ProviderError {
+            guard case .httpStatus(500, _, let bodySnippet, "/api/version") = error else {
+                XCTFail("Expected detailed HTTP status error, got \(error)")
+                return
+            }
+            XCTAssertEqual(bodySnippet?.count, 1_000)
+        }
+    }
+
     func testStreamChatPostsChatPayloadAndYieldsContentDeltas() async throws {
         var capturedRequest: URLRequest?
         let client = OllamaClient(
@@ -109,6 +187,100 @@ final class OllamaClientTests: XCTestCase {
         XCTAssertEqual(json?["model"] as? String, "llama3.2:latest")
         XCTAssertEqual(json?["stream"] as? Bool, true)
         XCTAssertEqual(chunks, ["Hello", " world"])
+    }
+
+    func testStreamChatSanitizesUnsupportedRolesAndDropsEmptyMessages() async throws {
+        var capturedRequest: URLRequest?
+        let client = OllamaClient(
+            baseURL: URL(string: "http://localhost:11434")!,
+            dataLoader: { request in
+                (Data(), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            },
+            lineStreamLoader: { request in
+                capturedRequest = request
+                return AsyncThrowingStream { continuation in
+                    continuation.yield(#"{"done":true}"#)
+                    continuation.finish()
+                }
+            }
+        )
+
+        for try await _ in client.streamChat(
+            model: "llama3.2:latest",
+            messages: [
+                ProviderChatMessage(role: "developer", content: "Prefer short answers."),
+                ProviderChatMessage(role: "assistant", content: "   "),
+                ProviderChatMessage(role: "user", content: "Say hello")
+            ]
+        ) {}
+
+        let body = try XCTUnwrap(capturedRequest?.httpBody)
+        let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        let messages = try XCTUnwrap(json?["messages"] as? [[String: Any]])
+        XCTAssertEqual(messages.count, 2)
+        XCTAssertEqual(messages[0]["role"] as? String, "user")
+        XCTAssertEqual(messages[0]["content"] as? String, "Prefer short answers.")
+        XCTAssertEqual(messages[1]["role"] as? String, "user")
+        XCTAssertEqual(messages[1]["content"] as? String, "Say hello")
+    }
+
+    func testStreamChatMalformedJSONLineProducesSafeParseError() async throws {
+        let client = OllamaClient(
+            baseURL: URL(string: "http://localhost:11434")!,
+            dataLoader: { request in
+                (Data(), HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            },
+            lineStreamLoader: { _ in
+                AsyncThrowingStream { continuation in
+                    continuation.yield(#"{"message":"unterminated""#)
+                    continuation.finish()
+                }
+            }
+        )
+
+        do {
+            for try await _ in client.streamChat(
+                model: "llama3.2:latest",
+                messages: [ProviderChatMessage(role: "user", content: "Say hello")]
+            ) {}
+            XCTFail("Expected malformed stream line error")
+        } catch let error as ProviderError {
+            XCTAssertEqual(
+                error,
+                .malformedStreamLine(endpoint: "/api/chat", lineSnippet: #"{"message":"unterminated""#)
+            )
+        }
+    }
+
+    func testDiagnosticChatPostsNonStreamingTinyChatRequest() async throws {
+        var capturedRequest: URLRequest?
+        let client = OllamaClient(
+            baseURL: URL(string: "http://localhost:11434")!,
+            dataLoader: { request in
+                capturedRequest = request
+                let data = #"{"message":{"role":"assistant","content":"OK"},"done":true}"#.data(using: .utf8)!
+                return (data, HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!)
+            },
+            lineStreamLoader: { _ in
+                AsyncThrowingStream { continuation in
+                    continuation.finish()
+                }
+            }
+        )
+
+        let reply = try await client.runDiagnosticChat(model: "llama3.2:latest")
+
+        XCTAssertEqual(reply, "OK")
+        XCTAssertEqual(capturedRequest?.url?.path, "/api/chat")
+        XCTAssertEqual(capturedRequest?.httpMethod, "POST")
+        let body = try XCTUnwrap(capturedRequest?.httpBody)
+        let json = try JSONSerialization.jsonObject(with: body) as? [String: Any]
+        XCTAssertEqual(json?["model"] as? String, "llama3.2:latest")
+        XCTAssertEqual(json?["stream"] as? Bool, false)
+        let messages = try XCTUnwrap(json?["messages"] as? [[String: Any]])
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages.first?["role"] as? String, "user")
+        XCTAssertEqual(messages.first?["content"] as? String, "Reply with OK.")
     }
 
     func testStreamCompletionPostsGeneratePayloadAndYieldsResponseDeltas() async throws {

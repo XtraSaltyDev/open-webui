@@ -25,6 +25,9 @@ struct OpenWebUINativeApp: App {
                 .onDisappear {
                     store.stopAutomationScheduler()
                     store.stopCalendarReminderScheduler()
+                    Task {
+                        await store.stopAppOwnedOllamaIfNeeded()
+                    }
                 }
                 .onOpenURL { url in
                     _ = store.handleAppURL(url)
