@@ -119,17 +119,14 @@
 	const USAGE_POOL_REFRESH_INTERVAL_MS = 2000;
 
 	const refreshUsagePool = async () => {
-		if (!localStorage.getItem('token')) {
-			USAGE_POOL.set(null);
-			return;
-		}
-
-		const currentUsage = await getUsage(localStorage.token).catch(() => null);
+		const currentUsage = await getUsage(localStorage.getItem('token') ?? '').catch(() => null);
 
 		if (Array.isArray(currentUsage?.model_ids)) {
 			USAGE_POOL.set(currentUsage.model_ids);
+			return true;
 		} else {
 			USAGE_POOL.set(null);
+			return false;
 		}
 	};
 
@@ -222,11 +219,13 @@
 			if (localStorage.getItem('token')) {
 				// Emit user-join event with auth token
 				_socket.emit('user-join', { auth: { token: localStorage.token } });
-				await refreshUsagePool();
-				startUsagePoolInterval();
 			} else {
 				console.warn('No token found in localStorage, user-join event not emitted');
-				USAGE_POOL.set(null);
+			}
+
+			if (await refreshUsagePool()) {
+				startUsagePoolInterval();
+			} else {
 				clearUsagePoolInterval();
 			}
 		});

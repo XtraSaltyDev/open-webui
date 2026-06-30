@@ -73,12 +73,7 @@
 	const USAGE_POOL_SELECTOR_REFRESH_INTERVAL_MS = 1000;
 
 	const refreshUsagePool = async () => {
-		if (!localStorage.getItem('token')) {
-			USAGE_POOL.set(null);
-			return;
-		}
-
-		const currentUsage = await getUsage(localStorage.token).catch(() => null);
+		const currentUsage = await getUsage(localStorage.getItem('token') ?? '').catch(() => null);
 
 		if (Array.isArray(currentUsage?.model_ids)) {
 			USAGE_POOL.set(currentUsage.model_ids);
