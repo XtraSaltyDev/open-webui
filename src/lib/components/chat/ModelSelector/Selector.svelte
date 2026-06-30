@@ -67,6 +67,7 @@
 	let show = false;
 	let usagePoolRefreshInterval = null;
 	let usagePoolRefreshShowState = show;
+	let selectorUsagePool = null;
 	let triggerElement: HTMLElement | null = null;
 	let contentElement: HTMLElement | null = null;
 	let dropdownPosition = { top: 0, left: 0, width: 0 };
@@ -76,7 +77,10 @@
 		const currentUsage = await getUsage(localStorage.getItem('token') ?? '').catch(() => null);
 
 		if (Array.isArray(currentUsage?.model_ids)) {
-			USAGE_POOL.set(currentUsage.model_ids);
+			selectorUsagePool = currentUsage.model_ids;
+			USAGE_POOL.set(selectorUsagePool);
+		} else {
+			selectorUsagePool = null;
 		}
 	};
 
@@ -85,6 +89,7 @@
 			clearInterval(usagePoolRefreshInterval);
 			usagePoolRefreshInterval = null;
 		}
+		selectorUsagePool = null;
 	};
 
 	const startUsagePoolRefresh = () => {
@@ -792,6 +797,7 @@
 										{item}
 										{index}
 										{value}
+										usagePool={selectorUsagePool}
 										{pinModelHandler}
 										{unloadModelHandler}
 										{deleteModelHandler}

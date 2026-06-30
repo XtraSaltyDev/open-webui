@@ -24,6 +24,7 @@
 	export let item: any = {};
 	export let index: number = -1;
 	export let value: string = '';
+	export let usagePool: string[] | null | undefined = undefined;
 
 	export let unloadModelHandler: (modelValue: string) => void = () => {};
 	export let pinModelHandler: (modelId: string) => void = () => {};
@@ -43,7 +44,8 @@
 	};
 
 	let showMenu = false;
-	$: isModelRunning = isModelInUsagePool($USAGE_POOL, [
+	$: activeUsagePool = usagePool ?? $USAGE_POOL;
+	$: isModelRunning = isModelInUsagePool(activeUsagePool, [
 		item?.model?.id,
 		item?.value,
 		item?.model?.base_model_id,
