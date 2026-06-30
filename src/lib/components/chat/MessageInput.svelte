@@ -91,7 +91,7 @@
 	import Terminal from '../icons/Terminal.svelte';
 	import IntegrationsMenu from './MessageInput/IntegrationsMenu.svelte';
 	import TerminalMenu from './MessageInput/TerminalMenu.svelte';
-	import Component from '../icons/Component.svelte';
+	import Grid from '../icons/Grid.svelte';
 	import PlusAlt from '../icons/PlusAlt.svelte';
 	import Dropdown from '../common/Dropdown.svelte';
 
@@ -1207,9 +1207,7 @@
 
 		<div class="bg-transparent">
 			<div
-				class="{($settings?.widescreenMode ?? null)
-					? 'max-w-full'
-					: 'max-w-6xl'} px-2.5 mx-auto inset-x-0"
+				class="{($settings?.widescreenMode ?? null) ? 'max-w-full' : 'max-w-6xl'} mx-auto inset-x-0"
 			>
 				<div class="">
 					<input
@@ -1295,9 +1293,11 @@
 
 						<div
 							id="message-input-container"
-							class="flex-1 flex flex-col relative w-full shadow-lg rounded-3xl border {$temporaryChatEnabled
-								? 'border-dashed border-gray-100 dark:border-gray-800 hover:border-gray-200 focus-within:border-gray-200 hover:dark:border-gray-700 focus-within:dark:border-gray-700'
-								: ' border-gray-100/30 dark:border-gray-850/30 hover:border-gray-200 focus-within:border-gray-100 hover:dark:border-gray-800 focus-within:dark:border-gray-800'}  transition px-1 bg-white/5 dark:bg-gray-500/5 backdrop-blur-sm dark:text-gray-100"
+							class="flex-1 flex flex-col relative w-full border bg-white px-[18px] pb-[13px] pt-[18px] text-[#2c2c28] transition dark:bg-[#1a1a18] dark:text-[#e4e4de] {history?.currentId
+								? 'rounded-[24px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_32px_-20px_rgba(0,0,0,0.25)]'
+								: 'rounded-[26px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_18px_40px_-22px_rgba(0,0,0,0.22)]'} {$temporaryChatEnabled
+								? 'border-dashed border-black/15 hover:border-black/20 focus-within:border-black/20 dark:border-white/15 dark:hover:border-white/20 dark:focus-within:border-white/20'
+								: 'border-black/10 hover:border-black/10 focus-within:border-black/10 dark:border-white/[0.09] dark:hover:border-white/10 dark:focus-within:border-white/10'}"
 							dir={$settings?.chatDirection ?? 'auto'}
 						>
 							{#if atSelectedModel !== undefined}
@@ -1422,13 +1422,13 @@
 								</div>
 							{/if}
 
-							<div class="px-2.5">
+							<div class="px-0">
 								<div
-									class="scrollbar-hidden rtl:text-right ltr:text-left bg-transparent dark:text-gray-100 outline-hidden w-full pb-1 px-1 resize-none h-fit max-h-96 overflow-auto {files.length ===
+									class="scrollbar-hidden rtl:text-right ltr:text-left bg-transparent text-[15.5px] leading-[1.6] text-[#2c2c28] outline-hidden w-full pb-1 px-0 resize-none h-fit max-h-96 overflow-auto dark:text-[#e4e4de] {files.length ===
 									0
 										? atSelectedModel !== undefined
-											? 'pt-1.5'
-											: 'pt-2.5'
+											? 'pt-1'
+											: 'pt-0'
 										: ''}"
 									id="chat-input-container"
 								>
@@ -1618,8 +1618,10 @@
 								</div>
 							</div>
 
-							<div class=" flex justify-between mt-0.5 mb-2.5 mx-0.5 max-w-full" dir="ltr">
-								<div class="ml-1 self-end flex items-center flex-1 max-w-[80%]">
+							<div class=" flex justify-between mt-[14px] max-w-full gap-3" dir="ltr">
+								<div
+									class="self-end flex items-center flex-1 max-w-[80%] gap-2 overflow-x-auto scrollbar-none"
+								>
 									<InputMenu
 										bind:files
 										selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
@@ -1675,18 +1677,34 @@
 										<button
 											type="button"
 											id="input-menu-button"
-											class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+											class="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-transparent px-3 py-[7px] text-[13px] font-medium text-[#5a5a55] transition hover:bg-black/[0.045] outline-hidden focus:outline-hidden dark:border-white/10 dark:text-[#b0b0aa] dark:hover:bg-white/[0.06]"
 											aria-label={$i18n.t('More')}
 										>
-											<PlusAlt className="size-5.5" />
+											<PlusAlt className="size-4" strokeWidth="1.8" />
+											<span>{$i18n.t('Attach')}</span>
 										</button>
 									</InputMenu>
 
-									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
-										<div
-											class="flex self-center w-[1px] h-4 mx-1 bg-gray-200/50 dark:bg-gray-800/50"
-										/>
+									{#if showWebSearchButton}
+										<Tooltip content={$i18n.t('Web Search')} placement="top">
+											<button
+												type="button"
+												aria-label={webSearchEnabled
+													? $i18n.t('Disable Web Search')
+													: $i18n.t('Enable Web Search')}
+												aria-pressed={webSearchEnabled}
+												on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
+												class="inline-flex items-center gap-1.5 rounded-full border px-3 py-[7px] text-[13px] font-medium transition outline-hidden focus:outline-hidden {webSearchEnabled
+													? 'border-daylight-accent/30 bg-daylight-accent/10 text-daylight-accent dark:border-daylight-accent-dark/30 dark:bg-daylight-accent-dark/10 dark:text-daylight-accent-dark'
+													: 'border-black/10 bg-transparent text-[#5a5a55] hover:bg-black/[0.045] dark:border-white/10 dark:text-[#b0b0aa] dark:hover:bg-white/[0.06]'}"
+											>
+												<GlobeAlt className="size-4" strokeWidth="1.7" />
+												<span>{$i18n.t('Web search')}</span>
+											</button>
+										</Tooltip>
+									{/if}
 
+									{#if showWebSearchButton || showImageGenerationButton || showCodeInterpreterButton || showToolsButton || showSkillsButton || (toggleFilters && toggleFilters.length > 0)}
 										<IntegrationsMenu
 											selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
 											{toggleFilters}
@@ -1717,10 +1735,11 @@
 											<button
 												type="button"
 												id="integration-menu-button"
-												class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+												class="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-transparent px-3 py-[7px] text-[13px] font-medium text-[#5a5a55] transition hover:bg-black/[0.045] outline-hidden focus:outline-hidden dark:border-white/10 dark:text-[#b0b0aa] dark:hover:bg-white/[0.06]"
 												aria-label={$i18n.t('Integrations')}
 											>
-												<Component className="size-4.5" strokeWidth="1.5" />
+												<Grid className="size-4" strokeWidth="1.8" />
+												<span>{$i18n.t('Tools')}</span>
 											</button>
 										</IntegrationsMenu>
 									{/if}
@@ -1731,7 +1750,7 @@
 												<button
 													type="button"
 													id="model-valves-button"
-													class="bg-transparent hover:bg-gray-100 text-gray-700 dark:text-white dark:hover:bg-gray-800 rounded-full size-8 flex justify-center items-center outline-hidden focus:outline-hidden"
+													class="inline-flex size-8 items-center justify-center rounded-full bg-transparent text-[#5a5a55] transition hover:bg-black/[0.045] dark:text-[#b0b0aa] dark:hover:bg-white/[0.06] outline-hidden focus:outline-hidden"
 													on:click={() => {
 														selectedValvesType = 'function';
 														selectedValvesItemId = selectedModelIds[0]?.split('.')[0];
@@ -1851,24 +1870,6 @@
 											{/if}
 										{/each}
 
-										{#if webSearchEnabled}
-											<Tooltip content={$i18n.t('Web Search')} placement="top">
-												<button
-													on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
-													type="button"
-													class="group p-[7px] flex gap-1.5 items-center text-sm rounded-full transition-colors duration-300 focus:outline-hidden max-w-full overflow-hidden {webSearchEnabled ||
-													($settings?.webSearch ?? false) === 'always'
-														? ' text-sky-500 dark:text-sky-300 bg-sky-50 hover:bg-sky-100 dark:bg-sky-400/10 dark:hover:bg-sky-600/10 border border-sky-200/40 dark:border-sky-500/20'
-														: 'bg-transparent text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-800 '}"
-												>
-													<GlobeAlt className="size-4" strokeWidth="1.75" />
-													<div class="hidden group-hover:block">
-														<XMark className="size-4" strokeWidth="1.75" />
-													</div>
-												</button>
-											</Tooltip>
-										{/if}
-
 										{#if imageGenerationEnabled}
 											<Tooltip content={$i18n.t('Image')} placement="top">
 												<button
@@ -1936,12 +1937,12 @@
 									</div>
 								</div>
 
-								<div class="self-end flex space-x-1 mr-1 shrink-0 gap-[0.5px]">
+								<div class="self-end flex shrink-0 items-center gap-2">
 									{#if isActive && prompt === '' && files.length === 0}
 										<div class=" flex items-center">
 											<Tooltip content={$i18n.t('Stop')}>
 												<button
-													class="bg-white hover:bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-white dark:hover:bg-gray-800 transition rounded-full p-1.5"
+													class="flex size-9 items-center justify-center rounded-full bg-white text-[#5a5a55] transition hover:bg-black/[0.045] dark:bg-[#1a1a18] dark:text-[#b0b0aa] dark:hover:bg-white/[0.06]"
 													on:click={() => {
 														stopResponse();
 													}}
@@ -1967,7 +1968,7 @@
 											<Tooltip content={$i18n.t('Create note')} className=" flex items-center">
 												<button
 													id="create-note-button"
-													class=" text-gray-500 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-1.5 -mr-1 self-center"
+													class="flex size-9 items-center justify-center rounded-full bg-transparent text-[#7a7a74] transition hover:bg-black/[0.045] hover:text-[#3c3c38] dark:text-[#9a9a94] dark:hover:bg-white/[0.06] dark:hover:text-[#f2f2ee]"
 													type="button"
 													disabled={prompt === '' && files.length === 0}
 													on:click={() => {
@@ -1993,7 +1994,7 @@
 												<Tooltip content={$i18n.t('Dictate')}>
 													<button
 														id="voice-input-button"
-														class=" text-gray-600 dark:text-gray-300 hover:text-gray-700 dark:hover:text-gray-200 transition rounded-full p-1.5 self-center mr-0.5"
+														class="flex size-9 items-center justify-center rounded-full bg-transparent text-[#7a7a74] transition hover:bg-black/[0.045] hover:text-[#3c3c38] dark:text-[#9a9a94] dark:hover:bg-white/[0.06] dark:hover:text-[#f2f2ee]"
 														type="button"
 														on:click={async () => {
 															try {
@@ -2044,7 +2045,7 @@
 												<!-- {$i18n.t('Call')} -->
 												<Tooltip content={$i18n.t('Voice mode')}>
 													<button
-														class=" bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 transition rounded-full p-1.5 self-center"
+														class="flex size-[38px] items-center justify-center rounded-full bg-daylight-accent text-white shadow-[0_4px_10px_-3px_rgba(192,98,60,0.6)] transition hover:bg-daylight-accent-hover dark:bg-daylight-accent dark:hover:bg-daylight-send-dark"
 														type="button"
 														on:click={async () => {
 															if (selectedModels.length > 1) {
@@ -2112,8 +2113,8 @@
 													<button
 														id="send-message-button"
 														class="{!(prompt === '' && files.length === 0) || uploadPending
-															? 'bg-black text-white hover:bg-gray-900 dark:bg-white dark:text-black dark:hover:bg-gray-100 '
-															: 'text-white bg-gray-200 dark:text-gray-900 dark:bg-gray-700 disabled'} transition rounded-full p-1.5 self-center"
+															? 'bg-daylight-accent text-white hover:bg-daylight-accent-hover dark:bg-daylight-accent dark:hover:bg-daylight-send-dark shadow-[0_4px_10px_-3px_rgba(192,98,60,0.6)]'
+															: 'bg-[#e5e3dc] text-white disabled dark:bg-[#2a2a27] dark:text-[#6a6a64]'} flex size-[38px] items-center justify-center rounded-full transition"
 														type="submit"
 														disabled={(prompt === '' && files.length === 0) || uploadPending}
 													>

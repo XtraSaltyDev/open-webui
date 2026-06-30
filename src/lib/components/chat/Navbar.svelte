@@ -84,7 +84,7 @@
 
 <nav
 	class="sticky top-0 z-30 w-full {chat?.id
-		? 'pt-0.5 pb-1'
+		? 'pt-0.5 pb-1 border-b border-black/[0.06] bg-white/90 backdrop-blur dark:border-white/[0.06] dark:bg-[#0e0e0d]/90'
 		: 'pt-1 pb-1'} -mb-12 flex flex-col items-center drag-region"
 >
 	<div class="flex items-center w-full pl-1.5 pr-1">

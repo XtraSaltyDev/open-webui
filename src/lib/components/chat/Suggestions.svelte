@@ -1,9 +1,11 @@
 <script lang="ts">
 	import Fuse from 'fuse.js';
-	import Bolt from '$lib/components/icons/Bolt.svelte';
-	import { onMount, getContext } from 'svelte';
+	import { getContext } from 'svelte';
 	import { settings, WEBUI_NAME } from '$lib/stores';
 	import { WEBUI_VERSION } from '$lib/constants';
+	import Code from '$lib/components/icons/Code.svelte';
+	import BookOpen from '$lib/components/icons/BookOpen.svelte';
+	import Sparkles from '$lib/components/icons/Sparkles.svelte';
 
 	const i18n = getContext('i18n');
 
@@ -62,15 +64,50 @@
 		sortedPrompts = [...(suggestionPrompts ?? [])].sort(() => Math.random() - 0.5);
 		getFilteredPrompts(inputValue);
 	}
+
+	const getPromptTitle = (prompt) => {
+		return prompt.title?.[0] || prompt.content;
+	};
+
+	const getPromptSubtitle = (prompt) => {
+		return prompt.title?.[1] || $i18n.t('Prompt');
+	};
 </script>
 
-<div class="mb-1 flex gap-1 text-xs font-medium items-center text-gray-600 dark:text-gray-400">
-	{#if filteredPrompts.length > 0}
-		<Bolt />
-		{$i18n.t('Suggested')}
-	{:else}
-		<!-- Keine Vorschläge -->
-
+{#if filteredPrompts.length > 0}
+	<div role="list" class={className}>
+		{#each filteredPrompts.slice(0, 3) as prompt, idx (prompt.id || `${prompt.content}-${idx}`)}
+			<!-- svelte-ignore a11y-no-interactive-element-to-noninteractive-role -->
+			<button
+				role="listitem"
+				class="waterfall group flex min-h-[112px] flex-col rounded-2xl border border-black/[0.09] bg-[#faf9f6] px-[15px] py-3.5 text-left transition duration-150 hover:-translate-y-0.5 hover:shadow-[0_10px_22px_-14px_rgba(0,0,0,0.3)] dark:border-white/[0.08] dark:bg-[#171715]/50 dark:hover:bg-[#1d1d1b]"
+				style="animation-delay: {idx * 60}ms"
+				on:click={() => onSelect({ type: 'prompt', data: prompt.content })}
+			>
+				<div class="text-daylight-accent dark:text-daylight-accent-dark">
+					{#if idx === 0}
+						<Code className="size-[18px]" strokeWidth="1.7" />
+					{:else if idx === 1}
+						<BookOpen className="size-[18px]" strokeWidth="1.7" />
+					{:else}
+						<Sparkles className="size-[18px]" strokeWidth="1.7" />
+					{/if}
+				</div>
+				<div
+					class="mt-2.5 line-clamp-2 text-sm font-semibold text-[#1a1a19] transition dark:text-[#f2f2ee]"
+				>
+					{getPromptTitle(prompt)}
+				</div>
+				<div
+					class="mt-0.5 line-clamp-2 text-[12.5px] font-normal text-[#8a8a84] dark:text-[#7a7a74]"
+				>
+					{getPromptSubtitle(prompt)}
+				</div>
+			</button>
+		{/each}
+	</div>
+{:else}
+	<div class="h-20 w-full">
 		<div
 			class="flex w-full {$settings?.landingPageMode === 'chat'
 				? ' -mt-1'
@@ -78,48 +115,8 @@
 		>
 			{$WEBUI_NAME} ‧ v{WEBUI_VERSION}
 		</div>
-	{/if}
-</div>
-
-<div class="h-40 w-full">
-	{#if filteredPrompts.length > 0}
-		<div role="list" class="max-h-40 overflow-auto scrollbar-none items-start {className}">
-			{#each filteredPrompts as prompt, idx (prompt.id || `${prompt.content}-${idx}`)}
-				<!-- svelte-ignore a11y-no-interactive-element-to-noninteractive-role -->
-				<button
-					role="listitem"
-					class="waterfall flex flex-col flex-1 shrink-0 w-full justify-between
-				       px-3 py-2 rounded-xl bg-transparent hover:bg-black/5
-				       dark:hover:bg-white/5 transition group"
-					style="animation-delay: {idx * 60}ms"
-					on:click={() => onSelect({ type: 'prompt', data: prompt.content })}
-				>
-					<div class="flex flex-col text-left">
-						{#if prompt.title && prompt.title[0] !== ''}
-							<div
-								class="font-medium dark:text-gray-300 dark:group-hover:text-gray-200 transition line-clamp-1"
-							>
-								{prompt.title[0]}
-							</div>
-							<div class="text-xs text-gray-600 dark:text-gray-400 font-normal line-clamp-1">
-								{prompt.title[1]}
-							</div>
-						{:else}
-							<div
-								class="font-medium dark:text-gray-300 dark:group-hover:text-gray-200 transition line-clamp-1"
-							>
-								{prompt.content}
-							</div>
-							<div class="text-xs text-gray-600 dark:text-gray-400 font-normal line-clamp-1">
-								{$i18n.t('Prompt')}
-							</div>
-						{/if}
-					</div>
-				</button>
-			{/each}
-		</div>
-	{/if}
-</div>
+	</div>
+{/if}
 
 <style>
 	/* Waterfall animation for the suggestions */

@@ -1,6 +1,7 @@
 x.py
 yarn.lock
 .DS_Store
+/MEMORY.md
 node_modules
 /build
 /.svelte-kit

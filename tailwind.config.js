@@ -7,6 +7,14 @@ export default {
 	content: ['./src/**/*.{html,js,svelte,ts}'],
 	theme: {
 		extend: {
+			colors: {
+				daylight: {
+					accent: '#c0623c',
+					'accent-hover': '#a8552f',
+					'accent-dark': '#d98a64',
+					'send-dark': '#cf6c44'
+				}
+			},
 			typography: {
 				DEFAULT: {
 					css: {

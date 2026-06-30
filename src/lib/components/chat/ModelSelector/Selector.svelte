@@ -15,6 +15,7 @@
 
 	import { deleteModel, getOllamaVersion, pullModel } from '$lib/apis/ollama';
 	import { unloadModel } from '$lib/apis';
+	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import {
 		user,
@@ -56,7 +57,7 @@
 	}[] = [];
 
 	export let className = 'w-[32rem]';
-	export let triggerClassName = 'text-lg';
+	export let triggerClassName = 'text-[13px] font-medium';
 
 	export let pinModelHandler: (modelId: string) => void = () => {};
 
@@ -518,7 +519,7 @@
 		on:click={toggleOpen}
 	>
 		<div
-			class="flex w-full text-left px-0.5 bg-transparent truncate {triggerClassName} justify-between {($settings?.highContrastMode ??
+			class="inline-flex w-full items-center gap-2 rounded-full border border-black/10 bg-white py-1.5 pl-1.5 pr-2 text-left text-[#2c2c28] transition hover:bg-[#faf9f6] dark:border-white/10 dark:bg-[#1a1a18] dark:text-[#e4e4de] dark:hover:bg-[#222220] {triggerClassName} justify-between {($settings?.highContrastMode ??
 			false)
 				? 'dark:placeholder-gray-100 placeholder-gray-800'
 				: 'placeholder-gray-400'}"
@@ -532,11 +533,23 @@
 			}}
 		>
 			{#if selectedModel}
-				{selectedModel.label}
+				<img
+					src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${selectedModel.value}&lang=${$i18n.language}`}
+					class="size-5 rounded-full bg-[#1a1a19] object-cover dark:bg-[#f2f2ee]"
+					alt=""
+					draggable="false"
+					on:error={(e) => {
+						e.currentTarget.src = '/favicon.png';
+					}}
+				/>
+				<span class="truncate">{selectedModel.label}</span>
 			{:else}
-				{placeholder}
+				<span class="truncate">{placeholder}</span>
 			{/if}
-			<ChevronDown className=" self-center ml-2 size-3" strokeWidth="2.5" />
+			<ChevronDown
+				className="size-3.5 shrink-0 text-[#9a9a94] dark:text-[#7a7a74]"
+				strokeWidth="2"
+			/>
 		</div>
 	</button>
 

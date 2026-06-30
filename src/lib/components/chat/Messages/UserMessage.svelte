@@ -369,11 +369,11 @@
 				<div class="w-full">
 					<div class="flex {($settings?.chatBubble ?? true) ? 'justify-end pb-1' : 'w-full'}">
 						<div
-							class="rounded-3xl {($settings?.chatBubble ?? true)
-								? `max-w-[90%] px-4 py-1.5  bg-gray-50 dark:bg-gray-850 ${
+							class={($settings?.chatBubble ?? true)
+								? `max-w-[80%] rounded-[18px_18px_5px_18px] border border-black/[0.05] bg-[#f2efe9] px-4 py-3 text-[15px] leading-[1.55] text-[#2c2c28] dark:border-white/[0.07] dark:bg-[#1f1f1d] dark:text-[#e4e4de] ${
 										message.files ? 'rounded-tr-lg' : ''
 									}`
-								: ' w-full'}"
+								: ' w-full'}
 						>
 							{#if message.content}
 								{#if $settings?.renderMarkdownInUserMessages ?? true}
@@ -398,7 +398,7 @@
 				<div
 					class=" flex {($settings?.chatBubble ?? true)
 						? 'justify-end'
-						: ''}  text-gray-600 dark:text-gray-500"
+						: ''}  text-[#9a9a94] dark:text-[#7a7a74]"
 				>
 					{#if !($settings?.chatBubble ?? true)}
 						{#if siblings.length > 1}

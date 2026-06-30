@@ -41,7 +41,6 @@
 
 	import Name from './Name.svelte';
 	import ProfileImage from './ProfileImage.svelte';
-	import Skeleton from './Skeleton.svelte';
 	import Image from '$lib/components/common/Image.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import RateComment from './RateComment.svelte';
@@ -658,14 +657,14 @@
 		dir={$settings.chatDirection}
 		style="scroll-margin-top: 3rem;"
 	>
-		<div class={`shrink-0 ltr:mr-3 rtl:ml-3 hidden @lg:flex mt-1 `}>
+		<div class={`shrink-0 ltr:mr-[14px] rtl:ml-[14px] hidden @lg:flex mt-0.5 `}>
 			<ProfileImage
 				src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
-				className={'size-8 assistant-message-profile-image'}
+				className={'size-[30px] assistant-message-profile-image'}
 			/>
 		</div>
 
-		<div class="flex-auto w-0 pl-1 relative">
+		<div class="flex-auto w-0 pl-0 relative">
 			<Name>
 				<Tooltip content={model?.name ?? message.model} placement="top-start">
 					<span id="response-message-model-name" class="line-clamp-1 text-black dark:text-white">
@@ -823,11 +822,26 @@
 
 						<div
 							bind:this={contentContainerElement}
-							class="w-full flex flex-col relative {edit ? 'hidden' : ''}"
+							class="daylight-response-content w-full flex flex-col relative {edit ? 'hidden' : ''}"
 							id="response-content-container"
 						>
 							{#if message.content === '' && !message.done && !message.error && !hasVisibleStatus}
-								<Skeleton />
+								<div
+									class="flex items-center gap-[5px] py-2"
+									aria-label={$i18n.t('Assistant is typing')}
+								>
+									<span
+										class="owui-typing-dot size-[7px] rounded-full bg-daylight-accent dark:bg-daylight-accent-dark"
+									></span>
+									<span
+										class="owui-typing-dot size-[7px] rounded-full bg-daylight-accent dark:bg-daylight-accent-dark"
+										style="animation-delay: 0.2s;"
+									></span>
+									<span
+										class="owui-typing-dot size-[7px] rounded-full bg-daylight-accent dark:bg-daylight-accent-dark"
+										style="animation-delay: 0.4s;"
+									></span>
+								</div>
 							{:else if message.content && message.error !== true}
 								<!-- always show message contents even if there's an error -->
 								<!-- unless message.error === true which is legacy error handling, where the error message is stored in message.content -->
@@ -893,7 +907,7 @@
 				{#if !edit}
 					<div
 						bind:this={buttonsContainerElement}
-						class="flex justify-start overflow-x-auto buttons text-gray-600 dark:text-gray-500 mt-0.5"
+						class="daylight-response-actions flex justify-start overflow-x-auto buttons mt-3"
 					>
 						{#if message.done || siblings.length > 1}
 							{#if siblings.length > 1}

@@ -452,7 +452,7 @@
 			id="sidebar-chat-item"
 			class=" w-full flex justify-between rounded-xl px-[11px] py-[6px] {id === $chatId ||
 			confirmEdit
-				? 'bg-gray-100 dark:bg-gray-900 selected'
+				? 'bg-daylight-accent/10 shadow-[inset_2px_0_0_#c0623c] dark:bg-daylight-accent/20 selected'
 				: selected
 					? 'bg-gray-100 dark:bg-gray-950 selected'
 					: 'group-hover:bg-gray-100 dark:group-hover:bg-gray-950'}  whitespace-nowrap text-ellipsis relative {generating
@@ -488,7 +488,7 @@
 			id="sidebar-chat-item"
 			class=" w-full flex justify-between rounded-xl px-[11px] py-[6px] {id === $chatId ||
 			confirmEdit
-				? 'bg-gray-100 dark:bg-gray-900 selected'
+				? 'bg-daylight-accent/10 shadow-[inset_2px_0_0_#c0623c] dark:bg-daylight-accent/20 selected'
 				: selected
 					? 'bg-gray-100 dark:bg-gray-950 selected'
 					: ' group-hover:bg-gray-100 dark:group-hover:bg-gray-950'}  whitespace-nowrap text-ellipsis"
@@ -541,7 +541,7 @@
 					dir="auto"
 					class="text-left self-center overflow-hidden w-full h-[20px] truncate {unread
 						? 'font-medium text-gray-900 dark:text-gray-100'
-						: ''}"
+						: ''} {id === $chatId ? 'font-semibold text-[#1a1a19] dark:text-[#f2f2ee]' : ''}"
 				>
 					{title}
 				</div>
@@ -561,7 +561,7 @@
 		id="sidebar-chat-item-menu"
 		class="
         {id === $chatId || confirmEdit
-			? 'from-gray-100 dark:from-gray-900 selected'
+			? 'from-[#f3e8e2] dark:from-[#2a201c] selected'
 			: selected
 				? 'from-gray-100 dark:from-gray-950 selected'
 				: 'invisible group-hover:visible from-gray-100 dark:from-gray-950'}
