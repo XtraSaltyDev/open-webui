@@ -2024,6 +2024,17 @@ async def chat_completion(
         usage_model_id = form_data.get('model')
         usage_entry_id = f"chat:{metadata.get('chat_id') or 'direct'}:{metadata.get('message_id') or uuid4()}"
         usage_tracked = False
+        usage_cleanup_deferred = False
+
+        async def cleanup_usage_entry():
+            nonlocal usage_tracked
+            if usage_tracked:
+                try:
+                    await remove_usage_pool_entry(usage_model_id, usage_entry_id)
+                except Exception as e:
+                    log.debug(f'Error removing chat usage entry: {e}')
+                finally:
+                    usage_tracked = False
 
         try:
             if usage_model_id:
@@ -2054,7 +2065,22 @@ async def chat_completion(
 
             ctx = await build_chat_response_context(request, form_data, user, model, metadata, tasks, events)
 
-            return await process_chat_response(response, ctx)
+            processed_response = await process_chat_response(response, ctx)
+
+            if isinstance(processed_response, StreamingResponse) and usage_tracked:
+                original_body_iterator = processed_response.body_iterator
+                usage_cleanup_deferred = True
+
+                async def usage_tracked_body_iterator():
+                    try:
+                        async for chunk in original_body_iterator:
+                            yield chunk
+                    finally:
+                        await cleanup_usage_entry()
+
+                processed_response.body_iterator = usage_tracked_body_iterator()
+
+            return processed_response
         except asyncio.CancelledError:
             log.info('Chat processing was cancelled')
             try:
@@ -2110,11 +2136,8 @@ async def chat_completion(
                     detail=error_detail,
                 )
         finally:
-            if usage_tracked:
-                try:
-                    await remove_usage_pool_entry(usage_model_id, usage_entry_id)
-                except Exception as e:
-                    log.debug(f'Error removing chat usage entry: {e}')
+            if not usage_cleanup_deferred:
+                await cleanup_usage_entry()
 
             # Clean up MCP clients.  Each client is isolated so one
             # failure doesn't skip the rest.
