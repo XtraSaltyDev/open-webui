@@ -252,6 +252,41 @@ async def emit_usage_pool_update():
     await sio.emit('usage', get_usage_pool_snapshot())
 
 
+async def add_usage_pool_entry(model_id: str, entry_id: str):
+    if not model_id or not entry_id:
+        return
+
+    previous_models_in_use = get_models_in_use()
+    current_time = int(time.time())
+
+    USAGE_POOL[model_id] = {
+        **(USAGE_POOL[model_id] if model_id in USAGE_POOL else {}),
+        entry_id: {'updated_at': current_time},
+    }
+
+    if previous_models_in_use != get_models_in_use():
+        await emit_usage_pool_update()
+
+
+async def remove_usage_pool_entry(model_id: str, entry_id: str):
+    if not model_id or not entry_id or model_id not in USAGE_POOL:
+        return
+
+    previous_models_in_use = get_models_in_use()
+    connections = USAGE_POOL.get(model_id) or {}
+
+    if entry_id in connections:
+        del connections[entry_id]
+
+    if not connections:
+        del USAGE_POOL[model_id]
+    else:
+        USAGE_POOL[model_id] = connections
+
+    if previous_models_in_use != get_models_in_use():
+        await emit_usage_pool_update()
+
+
 def get_user_id_from_session_pool(sid):
     user = SESSION_POOL.get(sid)
     if user:
@@ -340,19 +375,7 @@ async def usage(sid, data):
         if not model_id:
             return
 
-        previous_models_in_use = get_models_in_use()
-
-        # Record the timestamp for the last update
-        current_time = int(time.time())
-
-        # Store the new usage data and task
-        USAGE_POOL[model_id] = {
-            **(USAGE_POOL[model_id] if model_id in USAGE_POOL else {}),
-            sid: {'updated_at': current_time},
-        }
-
-        if previous_models_in_use != get_models_in_use():
-            await emit_usage_pool_update()
+        await add_usage_pool_entry(model_id, sid)
 
 
 @sio.event

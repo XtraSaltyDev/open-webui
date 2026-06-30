@@ -45,6 +45,22 @@ async def test_usage_event_emits_when_active_model_pool_changes(socket_main, mon
 
 
 @pytest.mark.asyncio
+async def test_usage_pool_helpers_track_request_scoped_entries(socket_main, monkeypatch):
+    emissions = []
+
+    async def fake_emit(event, data, *args, **kwargs):
+        emissions.append((event, data))
+
+    monkeypatch.setattr(socket_main.sio, 'emit', fake_emit)
+
+    await socket_main.add_usage_pool_entry('model-a', 'request-1')
+    await socket_main.remove_usage_pool_entry('model-a', 'request-1')
+
+    assert socket_main.USAGE_POOL == {}
+    assert emissions == [('usage', {'model_ids': ['model-a']}), ('usage', {'model_ids': []})]
+
+
+@pytest.mark.asyncio
 async def test_usage_cleanup_emits_when_model_expires(socket_main, monkeypatch):
     emissions = []
 

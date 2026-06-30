@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import re
+import uuid
 from typing import Optional
 from urllib.parse import quote, urlparse
 
@@ -37,6 +38,7 @@ from open_webui.models.access_grants import AccessGrants
 from open_webui.models.groups import Groups
 from open_webui.models.models import Models
 from open_webui.models.users import UserModel
+from open_webui.socket.main import add_usage_pool_entry, remove_usage_pool_entry
 from open_webui.utils.access_control import check_model_access, has_connection_access
 from open_webui.utils.anthropic import get_anthropic_models, is_anthropic_url
 from open_webui.utils.auth import get_admin_user, get_verified_user
@@ -1207,8 +1209,13 @@ async def generate_chat_completion(
     r = None
     streaming = False
     response = None
+    usage_entry_id = None
+    usage_model_id = model_id
 
     try:
+        usage_entry_id = f'request:{uuid.uuid4()}'
+        await add_usage_pool_entry(usage_model_id, usage_entry_id)
+
         session = await get_session()
 
         r = await session.request(
@@ -1243,8 +1250,17 @@ async def generate_chat_completion(
                     )
 
             streaming = True
+            stream = stream_wrapper(r, content_handler=stream_chunks_handler)
+
+            async def usage_tracked_stream():
+                try:
+                    async for chunk in stream:
+                        yield chunk
+                finally:
+                    await remove_usage_pool_entry(usage_model_id, usage_entry_id)
+
             return StreamingResponse(
-                stream_wrapper(r, content_handler=stream_chunks_handler),
+                usage_tracked_stream(),
                 status_code=r.status,
                 headers=_clean_proxy_headers(r.headers),
             )
@@ -1274,6 +1290,9 @@ async def generate_chat_completion(
             detail=ERROR_MESSAGES.SERVER_CONNECTION_ERROR,
         )
     finally:
+        if usage_entry_id and not streaming:
+            await remove_usage_pool_entry(usage_model_id, usage_entry_id)
+
         if not streaming:
             await cleanup_response(r)
 
