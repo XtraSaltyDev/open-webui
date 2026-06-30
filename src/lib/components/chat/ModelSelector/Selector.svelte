@@ -10,17 +10,18 @@
 	import ConfirmDialog from '$lib/components/common/ConfirmDialog.svelte';
 	import { flyAndScale } from '$lib/utils/transitions';
 
-	import { createEventDispatcher, onMount, getContext, tick } from 'svelte';
+	import { createEventDispatcher, onMount, onDestroy, getContext, tick } from 'svelte';
 	import { goto } from '$app/navigation';
 
 	import { deleteModel, getOllamaVersion, pullModel } from '$lib/apis/ollama';
-	import { unloadModel } from '$lib/apis';
+	import { getUsage, unloadModel } from '$lib/apis';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
 
 	import {
 		user,
 		MODEL_DOWNLOAD_POOL,
 		models,
+		USAGE_POOL,
 		mobile,
 		temporaryChatEnabled,
 		settings,
@@ -64,9 +65,40 @@
 	let tagsContainerElement;
 
 	let show = false;
+	let usagePoolRefreshInterval = null;
+	let usagePoolRefreshShowState = show;
 	let triggerElement: HTMLElement | null = null;
 	let contentElement: HTMLElement | null = null;
 	let dropdownPosition = { top: 0, left: 0, width: 0 };
+	const USAGE_POOL_SELECTOR_REFRESH_INTERVAL_MS = 1000;
+
+	const refreshUsagePool = async () => {
+		if (!localStorage.getItem('token')) {
+			USAGE_POOL.set(null);
+			return;
+		}
+
+		const currentUsage = await getUsage(localStorage.token).catch(() => null);
+
+		if (Array.isArray(currentUsage?.model_ids)) {
+			USAGE_POOL.set(currentUsage.model_ids);
+		}
+	};
+
+	const stopUsagePoolRefresh = () => {
+		if (usagePoolRefreshInterval) {
+			clearInterval(usagePoolRefreshInterval);
+			usagePoolRefreshInterval = null;
+		}
+	};
+
+	const startUsagePoolRefresh = () => {
+		stopUsagePoolRefresh();
+		refreshUsagePool();
+		usagePoolRefreshInterval = setInterval(() => {
+			refreshUsagePool();
+		}, USAGE_POOL_SELECTOR_REFRESH_INTERVAL_MS);
+	};
 
 	const portal = (node: HTMLElement) => {
 		document.body.appendChild(node);
@@ -99,6 +131,15 @@
 			document.getElementById(`model-selector-${id}-button`)?.blur();
 		}
 	};
+
+	$: if (show !== usagePoolRefreshShowState) {
+		usagePoolRefreshShowState = show;
+		if (show) {
+			startUsagePoolRefresh();
+		} else {
+			stopUsagePoolRefresh();
+		}
+	}
 
 	const handlePointerDown = (e: PointerEvent) => {
 		if (!show) return;
@@ -397,6 +438,10 @@
 			// Remove duplicates and sort
 			tags = Array.from(new Set(tags)).sort((a, b) => a.localeCompare(b));
 		}
+	});
+
+	onDestroy(() => {
+		stopUsagePoolRefresh();
 	});
 
 	$: if (show) {
