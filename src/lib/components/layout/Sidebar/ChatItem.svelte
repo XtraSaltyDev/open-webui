@@ -105,6 +105,11 @@
 		!$activeChatIds.has(id) &&
 		(effectiveReadAt === null || (updatedAt !== null && updatedAt > effectiveReadAt));
 
+	$: menuPinned = id === $chatId || confirmEdit || selected;
+	$: menuBackdropClass = menuPinned
+		? 'selected'
+		: 'invisible group-hover:visible from-gray-100 dark:from-gray-950 bg-linear-to-l from-80% to-transparent';
+
 	const loadChat = async () => {
 		if (!chat) {
 			draggable = false;
@@ -539,7 +544,9 @@
 				{/if}
 				<div
 					dir="auto"
-					class="text-left self-center overflow-hidden w-full h-[20px] truncate {unread
+					class="text-left self-center overflow-hidden w-full h-[20px] truncate {menuPinned
+						? 'pr-8'
+						: ''} {unread
 						? 'font-medium text-gray-900 dark:text-gray-100'
 						: ''} {id === $chatId ? 'font-semibold text-[#1a1a19] dark:text-[#f2f2ee]' : ''}"
 				>
@@ -548,7 +555,7 @@
 			</div>
 
 			<!-- Time ago indicator -->
-			{#if createdAt && !mouseOver}
+			{#if createdAt && !mouseOver && !menuPinned}
 				<div class="shrink-0 self-center text-[10px] text-gray-400 dark:text-gray-500 pl-2">
 					{formatTimeAgo(createdAt)}
 				</div>
@@ -559,17 +566,9 @@
 	<!-- svelte-ignore a11y-no-static-element-interactions -->
 	<div
 		id="sidebar-chat-item-menu"
-		class="
-        {id === $chatId || confirmEdit
-			? 'from-[#f3e8e2] dark:from-[#2a201c] selected'
-			: selected
-				? 'from-gray-100 dark:from-gray-950 selected'
-				: 'invisible group-hover:visible from-gray-100 dark:from-gray-950'}
-            absolute {className === 'pr-2'
+		class="{menuBackdropClass} absolute {className === 'pr-2'
 			? 'right-[8px]'
-			: 'right-1'} top-[4px] py-1 pr-0.5 mr-1.5 pl-5 bg-linear-to-l from-80%
-
-              to-transparent"
+			: 'right-1'} top-[4px] py-1 pr-0.5 mr-1.5 pl-5"
 		on:mouseenter={(e) => {
 			mouseOver = true;
 		}}
