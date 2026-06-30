@@ -369,10 +369,10 @@
 				<div class="w-full">
 					<div class="flex {($settings?.chatBubble ?? true) ? 'justify-end pb-1' : 'w-full'}">
 						<div
-							class={($settings?.chatBubble ?? true)
-								? `max-w-[80%] rounded-[18px_18px_5px_18px] border border-black/[0.05] bg-[#f2efe9] px-4 py-3 text-[15px] leading-[1.55] text-[#2c2c28] dark:border-white/[0.07] dark:bg-[#1f1f1d] dark:text-[#e4e4de] ${
-										message.files ? 'rounded-tr-lg' : ''
-									}`
+						class={($settings?.chatBubble ?? true)
+							? `max-w-[84%] md:max-w-[80%] rounded-[18px_18px_5px_18px] border border-black/[0.05] bg-[#f2efe9] px-[15px] py-[11px] md:px-4 md:py-3 text-[15px] leading-[1.55] text-[#2c2c28] dark:border-white/[0.07] dark:bg-[#1f1f1d] dark:text-[#e4e4de] ${
+									message.files ? 'rounded-tr-lg' : ''
+								}`
 								: ' w-full'}
 						>
 							{#if message.content}

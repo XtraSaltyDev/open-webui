@@ -1291,13 +1291,13 @@
 							</div>
 						{/if}
 
-						<div
-							id="message-input-container"
-							class="flex-1 flex flex-col relative w-full border bg-white px-[18px] pb-[13px] pt-[18px] text-[#2c2c28] transition dark:bg-[#1a1a18] dark:text-[#e4e4de] {history?.currentId
-								? 'rounded-[24px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_32px_-20px_rgba(0,0,0,0.25)]'
-								: 'rounded-[26px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_18px_40px_-22px_rgba(0,0,0,0.22)]'} {$temporaryChatEnabled
-								? 'border-dashed border-black/15 hover:border-black/20 focus-within:border-black/20 dark:border-white/15 dark:hover:border-white/20 dark:focus-within:border-white/20'
-								: 'border-black/10 hover:border-black/10 focus-within:border-black/10 dark:border-white/[0.09] dark:hover:border-white/10 dark:focus-within:border-white/10'}"
+							<div
+								id="message-input-container"
+								class="flex-1 flex flex-col relative w-full border bg-white px-4 pb-[11px] pt-4 md:px-[18px] md:pb-[13px] md:pt-[18px] text-[#2c2c28] transition dark:bg-[#1a1a18] dark:text-[#e4e4de] {history?.currentId
+									? 'rounded-[22px] md:rounded-[24px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_10px_28px_-20px_rgba(0,0,0,0.25)] md:shadow-[0_1px_2px_rgba(0,0,0,0.04),0_12px_32px_-20px_rgba(0,0,0,0.25)]'
+									: 'rounded-[24px] md:rounded-[26px] shadow-[0_1px_2px_rgba(0,0,0,0.04),0_16px_36px_-22px_rgba(0,0,0,0.22)] md:shadow-[0_1px_2px_rgba(0,0,0,0.04),0_18px_40px_-22px_rgba(0,0,0,0.22)]'} {$temporaryChatEnabled
+									? 'border-dashed border-black/15 hover:border-black/20 focus-within:border-black/20 dark:border-white/15 dark:hover:border-white/20 dark:focus-within:border-white/20'
+									: 'border-black/10 hover:border-black/10 focus-within:border-black/10 dark:border-white/[0.09] dark:hover:border-white/10 dark:focus-within:border-white/10'}"
 							dir={$settings?.chatDirection ?? 'auto'}
 						>
 							{#if atSelectedModel !== undefined}
@@ -1422,12 +1422,14 @@
 								</div>
 							{/if}
 
-							<div class="px-0">
-								<div
-									class="scrollbar-hidden rtl:text-right ltr:text-left bg-transparent text-[15.5px] leading-[1.6] text-[#2c2c28] outline-hidden w-full pb-1 px-0 resize-none h-fit max-h-96 overflow-auto dark:text-[#e4e4de] {files.length ===
-									0
-										? atSelectedModel !== undefined
-											? 'pt-1'
+								<div class="px-0">
+									<div
+										class="scrollbar-hidden rtl:text-right ltr:text-left bg-transparent text-[15.5px] leading-[1.6] text-[#2c2c28] outline-hidden w-full pb-1 px-0 resize-none h-fit max-h-96 overflow-auto dark:text-[#e4e4de] {history?.currentId
+											? 'min-h-[22px]'
+											: 'min-h-[48px]'} md:min-h-0 {files.length ===
+										0
+											? atSelectedModel !== undefined
+												? 'pt-1'
 											: 'pt-0'
 										: ''}"
 									id="chat-input-container"
@@ -1618,10 +1620,10 @@
 								</div>
 							</div>
 
-							<div class=" flex justify-between mt-[14px] max-w-full gap-3" dir="ltr">
-								<div
-									class="self-end flex items-center flex-1 max-w-[80%] gap-2 overflow-x-auto scrollbar-none"
-								>
+								<div class=" flex justify-between mt-1.5 md:mt-[14px] max-w-full gap-2 md:gap-3" dir="ltr">
+									<div
+										class="self-end flex items-center flex-1 max-w-[64%] md:max-w-[80%] gap-1.5 md:gap-2 overflow-x-auto scrollbar-none"
+									>
 									<InputMenu
 										bind:files
 										selectedModels={atSelectedModel ? [atSelectedModel.id] : selectedModels}
@@ -1674,15 +1676,15 @@
 											chatInput?.focus();
 										}}
 									>
-										<button
-											type="button"
-											id="input-menu-button"
-											class="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-transparent px-3 py-[7px] text-[13px] font-medium text-[#5a5a55] transition hover:bg-black/[0.045] outline-hidden focus:outline-hidden dark:border-white/10 dark:text-[#b0b0aa] dark:hover:bg-white/[0.06]"
-											aria-label={$i18n.t('More')}
-										>
-											<PlusAlt className="size-4" strokeWidth="1.8" />
-											<span>{$i18n.t('Attach')}</span>
-										</button>
+											<button
+												type="button"
+												id="input-menu-button"
+												class="inline-flex size-9 md:size-auto items-center justify-center gap-1.5 rounded-full border border-black/10 bg-transparent p-0 md:px-3 md:py-[7px] text-[13px] font-medium text-[#5a5a55] transition hover:bg-black/[0.045] outline-hidden focus:outline-hidden dark:border-white/10 dark:text-[#b0b0aa] dark:hover:bg-white/[0.06]"
+												aria-label={$i18n.t('More')}
+											>
+												<PlusAlt className="size-4" strokeWidth="1.8" />
+												<span class="hidden md:inline">{$i18n.t('Attach')}</span>
+											</button>
 									</InputMenu>
 
 									{#if showWebSearchButton}
@@ -1692,15 +1694,15 @@
 												aria-label={webSearchEnabled
 													? $i18n.t('Disable Web Search')
 													: $i18n.t('Enable Web Search')}
-												aria-pressed={webSearchEnabled}
-												on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
-												class="inline-flex items-center gap-1.5 rounded-full border px-3 py-[7px] text-[13px] font-medium transition outline-hidden focus:outline-hidden {webSearchEnabled
-													? 'border-daylight-accent/30 bg-daylight-accent/10 text-daylight-accent dark:border-daylight-accent-dark/30 dark:bg-daylight-accent-dark/10 dark:text-daylight-accent-dark'
-													: 'border-black/10 bg-transparent text-[#5a5a55] hover:bg-black/[0.045] dark:border-white/10 dark:text-[#b0b0aa] dark:hover:bg-white/[0.06]'}"
-											>
-												<GlobeAlt className="size-4" strokeWidth="1.7" />
-												<span>{$i18n.t('Web search')}</span>
-											</button>
+													aria-pressed={webSearchEnabled}
+													on:click|preventDefault={() => (webSearchEnabled = !webSearchEnabled)}
+													class="inline-flex size-9 md:size-auto items-center justify-center gap-1.5 rounded-full border p-0 md:px-3 md:py-[7px] text-[13px] font-medium transition outline-hidden focus:outline-hidden {webSearchEnabled
+														? 'border-daylight-accent/30 bg-daylight-accent/10 text-daylight-accent dark:border-daylight-accent-dark/30 dark:bg-daylight-accent-dark/10 dark:text-daylight-accent-dark'
+														: 'border-black/10 bg-transparent text-[#5a5a55] hover:bg-black/[0.045] dark:border-white/10 dark:text-[#b0b0aa] dark:hover:bg-white/[0.06]'}"
+												>
+													<GlobeAlt className="size-4" strokeWidth="1.7" />
+													<span class="hidden md:inline">{$i18n.t('Web search')}</span>
+												</button>
 										</Tooltip>
 									{/if}
 
@@ -1732,15 +1734,15 @@
 												chatInput?.focus();
 											}}
 										>
-											<button
-												type="button"
-												id="integration-menu-button"
-												class="inline-flex items-center gap-1.5 rounded-full border border-black/10 bg-transparent px-3 py-[7px] text-[13px] font-medium text-[#5a5a55] transition hover:bg-black/[0.045] outline-hidden focus:outline-hidden dark:border-white/10 dark:text-[#b0b0aa] dark:hover:bg-white/[0.06]"
-												aria-label={$i18n.t('Integrations')}
-											>
-												<Grid className="size-4" strokeWidth="1.8" />
-												<span>{$i18n.t('Tools')}</span>
-											</button>
+												<button
+													type="button"
+													id="integration-menu-button"
+													class="inline-flex size-9 md:size-auto items-center justify-center gap-1.5 rounded-full border border-black/10 bg-transparent p-0 md:px-3 md:py-[7px] text-[13px] font-medium text-[#5a5a55] transition hover:bg-black/[0.045] outline-hidden focus:outline-hidden dark:border-white/10 dark:text-[#b0b0aa] dark:hover:bg-white/[0.06]"
+													aria-label={$i18n.t('Integrations')}
+												>
+													<Grid className="size-4" strokeWidth="1.8" />
+													<span class="hidden md:inline">{$i18n.t('Tools')}</span>
+												</button>
 										</IntegrationsMenu>
 									{/if}
 
@@ -1994,7 +1996,7 @@
 												<Tooltip content={$i18n.t('Dictate')}>
 													<button
 														id="voice-input-button"
-														class="flex size-9 items-center justify-center rounded-full bg-transparent text-[#7a7a74] transition hover:bg-black/[0.045] hover:text-[#3c3c38] dark:text-[#9a9a94] dark:hover:bg-white/[0.06] dark:hover:text-[#f2f2ee]"
+														class="flex {history?.currentId ? 'size-[34px] md:size-9' : 'size-9'} items-center justify-center rounded-full bg-transparent text-[#7a7a74] transition hover:bg-black/[0.045] hover:text-[#3c3c38] dark:text-[#9a9a94] dark:hover:bg-white/[0.06] dark:hover:text-[#f2f2ee]"
 														type="button"
 														on:click={async () => {
 															try {
@@ -2045,7 +2047,7 @@
 												<!-- {$i18n.t('Call')} -->
 												<Tooltip content={$i18n.t('Voice mode')}>
 													<button
-														class="flex size-[38px] items-center justify-center rounded-full bg-daylight-accent text-white shadow-[0_4px_10px_-3px_rgba(192,98,60,0.6)] transition hover:bg-daylight-accent-hover dark:bg-daylight-accent dark:hover:bg-daylight-send-dark"
+														class="flex {history?.currentId ? 'size-[38px]' : 'size-10 md:size-[38px]'} items-center justify-center rounded-full bg-daylight-accent text-white shadow-[0_4px_10px_-3px_rgba(192,98,60,0.6)] transition hover:bg-daylight-accent-hover dark:bg-daylight-accent dark:hover:bg-daylight-send-dark"
 														type="button"
 														on:click={async () => {
 															if (selectedModels.length > 1) {
@@ -2114,7 +2116,7 @@
 														id="send-message-button"
 														class="{!(prompt === '' && files.length === 0) || uploadPending
 															? 'bg-daylight-accent text-white hover:bg-daylight-accent-hover dark:bg-daylight-accent dark:hover:bg-daylight-send-dark shadow-[0_4px_10px_-3px_rgba(192,98,60,0.6)]'
-															: 'bg-[#e5e3dc] text-white disabled dark:bg-[#2a2a27] dark:text-[#6a6a64]'} flex size-[38px] items-center justify-center rounded-full transition"
+															: 'bg-[#e5e3dc] text-white disabled dark:bg-[#2a2a27] dark:text-[#6a6a64]'} flex {history?.currentId ? 'size-[38px]' : 'size-10 md:size-[38px]'} items-center justify-center rounded-full transition"
 														type="submit"
 														disabled={(prompt === '' && files.length === 0) || uploadPending}
 													>

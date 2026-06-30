@@ -519,7 +519,7 @@
 		on:click={toggleOpen}
 	>
 		<div
-			class="inline-flex w-full items-center gap-2 rounded-full border border-black/10 bg-white py-1.5 pl-1.5 pr-2 text-left text-[#2c2c28] transition hover:bg-[#faf9f6] dark:border-white/10 dark:bg-[#1a1a18] dark:text-[#e4e4de] dark:hover:bg-[#222220] {triggerClassName} justify-between {($settings?.highContrastMode ??
+				class="inline-flex w-full items-center gap-2 rounded-full border border-black/10 bg-white py-1.5 pl-1.5 pr-2 text-left text-[13px] font-medium text-[#2c2c28] transition hover:bg-[#faf9f6] dark:border-white/10 dark:bg-[#1a1a18] dark:text-[#e4e4de] dark:hover:bg-[#222220] {triggerClassName} justify-between {($settings?.highContrastMode ??
 			false)
 				? 'dark:placeholder-gray-100 placeholder-gray-800'
 				: 'placeholder-gray-400'}"

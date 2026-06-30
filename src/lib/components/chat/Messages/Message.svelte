@@ -47,7 +47,7 @@
 
 <div
 	role="listitem"
-	class="flex flex-col justify-between px-0 mb-[26px] w-full {($settings?.widescreenMode ?? null)
+		class="flex flex-col justify-between px-0 mb-[22px] md:mb-[26px] w-full {($settings?.widescreenMode ?? null)
 		? 'max-w-full'
 		: 'max-w-full'} mx-auto rounded-lg group message-listitem"
 >

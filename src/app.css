@@ -226,6 +226,12 @@ select {
 	line-height: 1.65;
 }
 
+@media (max-width: 767px) {
+	.daylight-response-content .markdown-prose {
+		line-height: 1.62;
+	}
+}
+
 .dark .daylight-response-content .markdown-prose {
 	color: #d4d4ce;
 }

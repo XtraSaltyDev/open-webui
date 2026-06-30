@@ -71,7 +71,7 @@
 	});
 </script>
 
-<div class="m-auto w-full max-w-[680px] px-4 py-16 text-center">
+<div class="m-auto w-full max-w-[680px] px-[22px] md:px-4 py-0 text-center md:py-16">
 	{#if $temporaryChatEnabled}
 		<Tooltip
 			content={$i18n.t("This chat won't appear in history and your messages will not be saved.")}
@@ -101,15 +101,18 @@
 					}}
 				/>
 			{:else}
-				<div class="mb-[26px]" in:fade={{ duration: 100 }}>
+				<div class="mb-[22px] md:mb-[26px]" in:fade={{ duration: 100 }}>
 					<div
-						class="font-secondary text-[clamp(2.5rem,8vw,46px)] leading-[1.05] tracking-[-0.01em] text-[#1a1a19] dark:text-[#f2f2ee]"
+						class="font-secondary text-[34px] md:text-[clamp(2.5rem,8vw,46px)] leading-[1.08] md:leading-[1.05] tracking-[-0.01em] text-[#1a1a19] dark:text-[#f2f2ee]"
 					>
 						{greeting}, {$user?.name || $i18n.t('there')}
 					</div>
 				</div>
 
-				<div class="mb-[18px] flex justify-center" in:fade={{ duration: 100, delay: 50 }}>
+				<div
+					class="mb-[18px] hidden justify-center md:flex"
+					in:fade={{ duration: 100, delay: 50 }}
+				>
 					<div class="max-w-72">
 						<ModelSelector bind:selectedModels showSetDefault={false} />
 					</div>
@@ -155,7 +158,10 @@
 			<FolderPlaceholder folder={$selectedFolder} />
 		</div>
 	{:else}
-		<div class="mx-auto w-full font-primary mt-[18px]" in:fade={{ duration: 200, delay: 200 }}>
+		<div
+			class="mx-auto hidden w-full font-primary md:mt-[18px] md:block"
+			in:fade={{ duration: 200, delay: 200 }}
+		>
 			<div>
 				<Suggestions
 					suggestionPrompts={atSelectedModel?.info?.meta?.suggestion_prompts ??
@@ -164,7 +170,7 @@
 						[]}
 					inputValue={prompt}
 					{onSelect}
-					className="grid grid-cols-1 gap-3 sm:grid-cols-3"
+					className="hidden md:grid md:grid-cols-3 md:gap-3"
 				/>
 			</div>
 		</div>

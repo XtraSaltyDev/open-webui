@@ -3130,9 +3130,9 @@
 								</div>
 							</div>
 
-							<div class="px-7 pb-[22px] pt-2 {dragged ? 'z-0' : 'z-10'}">
-								<div class="mx-auto max-w-[720px]">
-									<MessageInput
+								<div class="px-4 pb-3 pt-2 md:px-7 md:pb-[22px] {dragged ? 'z-0' : 'z-10'}">
+									<div class="mx-auto max-w-[720px]">
+										<MessageInput
 										bind:this={messageInput}
 										{history}
 										{taskIds}
@@ -3151,10 +3151,16 @@
 										bind:showCommands
 										bind:dragged
 										{generating}
-										{stopResponse}
-										{createMessagePair}
-										{onUpload}
-										messageQueue={$chatRequestQueues[$chatId] ?? []}
+											{stopResponse}
+											{createMessagePair}
+											{onUpload}
+											placeholder={$i18n.t('Reply to {{modelName}}...', {
+												modelName:
+													atSelectedModel?.name ??
+													$models.find((model) => model.id === selectedModels[0])?.name ??
+													$i18n.t('model')
+											})}
+											messageQueue={$chatRequestQueues[$chatId] ?? []}
 										{chatTasks}
 										onQueueSendNow={async (id) => {
 											const queue = $chatRequestQueues[$chatId] ?? [];

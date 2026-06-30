@@ -83,11 +83,56 @@
 />
 
 <nav
-	class="sticky top-0 z-30 w-full {chat?.id
-		? 'pt-0.5 pb-1 border-b border-black/[0.06] bg-white/90 backdrop-blur dark:border-white/[0.06] dark:bg-[#0e0e0d]/90'
-		: 'pt-1 pb-1'} -mb-12 flex flex-col items-center drag-region"
+	class="sticky top-0 z-30 w-full {$mobile
+		? ''
+		: chat?.id
+			? 'pt-0.5 pb-1 border-b border-black/[0.06] bg-white/90 backdrop-blur dark:border-white/[0.06] dark:bg-[#0e0e0d]/90'
+			: 'pt-1 pb-1'} {$mobile ? 'mb-0' : '-mb-12'} flex flex-col items-center drag-region"
 >
-	<div class="flex items-center w-full pl-1.5 pr-1">
+	{#if $mobile}
+		<div
+			class="flex w-full items-center justify-between gap-3 bg-white/90 px-[18px] py-2 backdrop-blur dark:bg-[#0e0e0d]/90 {chat?.id ? 'border-b border-black/[0.06] dark:border-white/[0.06]' : 'border-b-0'}"
+		>
+			{#if !$showSidebar}
+				<Tooltip content={$i18n.t('Open Sidebar')}>
+					<button
+						class="flex size-[38px] cursor-pointer items-center justify-center rounded-[10px] text-[#5a5a55] transition hover:bg-black/[0.05] dark:text-[#a0a09a] dark:hover:bg-white/[0.05]"
+						on:click={() => {
+							showSidebar.set(true);
+						}}
+						aria-label={$i18n.t('Open Sidebar')}
+					>
+						<Sidebar />
+					</button>
+				</Tooltip>
+			{:else}
+				<div class="size-[38px]" />
+			{/if}
+
+			<div class="min-w-0 max-w-[210px] flex-1">
+				{#if showModelSelector || $mobile}
+					<ModelSelector bind:selectedModels showSetDefault={false} />
+				{/if}
+			</div>
+
+			<Tooltip content={$i18n.t('New Chat')}>
+				<button
+					class="flex size-[38px] cursor-pointer items-center justify-center rounded-[10px] text-[#5a5a55] transition hover:bg-black/[0.05] dark:text-[#a0a09a] dark:hover:bg-white/[0.05]"
+					on:click={() => {
+						initNewChat();
+					}}
+					aria-label={$i18n.t('New Chat')}
+				>
+					{#if chat?.id}
+						<ChatPlus className="size-[19px]" strokeWidth="1.8" />
+					{:else}
+						<PencilSquare className="size-[19px]" strokeWidth="1.8" />
+					{/if}
+				</button>
+			</Tooltip>
+		</div>
+	{:else}
+		<div class="flex items-center w-full pl-1.5 pr-1">
 		<div
 			id="navbar-bg-gradient-to-b"
 			class="{chat?.id
@@ -242,7 +287,7 @@
 						</Tooltip>
 					{/if}
 
-					{#if $user !== undefined && $user !== null}
+					{#if !$mobile && $user !== undefined && $user !== null}
 						<UserMenu
 							className="w-[240px]"
 							role={$user?.role}
@@ -272,7 +317,8 @@
 				</div>
 			</div>
 		</div>
-	</div>
+		</div>
+	{/if}
 
 	{#if $temporaryChatEnabled && ($chatId ?? '').startsWith('local:')}
 		<div class=" w-full z-30 text-center">

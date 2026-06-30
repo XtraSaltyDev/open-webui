@@ -657,12 +657,12 @@
 		dir={$settings.chatDirection}
 		style="scroll-margin-top: 3rem;"
 	>
-		<div class={`shrink-0 ltr:mr-[14px] rtl:ml-[14px] hidden @lg:flex mt-0.5 `}>
-			<ProfileImage
-				src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
-				className={'size-[30px] assistant-message-profile-image'}
-			/>
-		</div>
+			<div class={`shrink-0 ltr:mr-[11px] rtl:ml-[11px] @lg:ltr:mr-[14px] @lg:rtl:ml-[14px] flex mt-0.5 `}>
+				<ProfileImage
+					src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
+					className={'size-7 @lg:size-[30px] assistant-message-profile-image'}
+				/>
+			</div>
 
 		<div class="flex-auto w-0 pl-0 relative">
 			<Name>
