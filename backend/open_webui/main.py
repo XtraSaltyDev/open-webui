@@ -517,11 +517,13 @@ from open_webui.routers.retrieval import (
 )
 from open_webui.socket.main import (
     MODELS,
+    add_usage_pool_entry,
     get_event_emitter,
     get_models_in_use,
     get_user_id_from_session_pool,
     periodic_session_pool_cleanup,
     periodic_usage_pool_cleanup,
+    remove_usage_pool_entry,
 )
 from open_webui.socket.main import (
     app as socket_app,
@@ -2019,7 +2021,18 @@ async def chat_completion(
         )
 
     async def process_chat(request, form_data, user, metadata, model, tasks=None):
+        usage_model_id = form_data.get('model')
+        usage_entry_id = f"chat:{metadata.get('chat_id') or 'direct'}:{metadata.get('message_id') or uuid4()}"
+        usage_tracked = False
+
         try:
+            if usage_model_id:
+                try:
+                    await add_usage_pool_entry(usage_model_id, usage_entry_id)
+                    usage_tracked = True
+                except Exception as e:
+                    log.debug(f'Error adding chat usage entry: {e}')
+
             form_data, metadata, events = await process_chat_payload(request, form_data, user, metadata, model)
 
             response = await chat_completion_handler(request, form_data, user)
@@ -2097,6 +2110,12 @@ async def chat_completion(
                     detail=error_detail,
                 )
         finally:
+            if usage_tracked:
+                try:
+                    await remove_usage_pool_entry(usage_model_id, usage_entry_id)
+                except Exception as e:
+                    log.debug(f'Error removing chat usage entry: {e}')
+
             # Clean up MCP clients.  Each client is isolated so one
             # failure doesn't skip the rest.
             #
