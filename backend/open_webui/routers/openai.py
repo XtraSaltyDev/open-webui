@@ -1211,10 +1211,38 @@ async def generate_chat_completion(
     response = None
     usage_entry_id = None
     usage_model_id = model_id
+    usage_refresh_task = None
+
+    async def refresh_usage_entry():
+        while True:
+            await asyncio.sleep(1)
+            if not usage_entry_id:
+                return
+            try:
+                await add_usage_pool_entry(usage_model_id, usage_entry_id)
+            except Exception as e:
+                log.debug(f'Error refreshing OpenAI usage entry: {e}')
+
+    async def cleanup_usage_entry():
+        nonlocal usage_entry_id, usage_refresh_task
+        entry_id = usage_entry_id
+        usage_entry_id = None
+
+        if usage_refresh_task:
+            usage_refresh_task.cancel()
+            try:
+                await usage_refresh_task
+            except asyncio.CancelledError:
+                pass
+            usage_refresh_task = None
+
+        if entry_id:
+            await remove_usage_pool_entry(usage_model_id, entry_id)
 
     try:
         usage_entry_id = f'request:{uuid.uuid4()}'
         await add_usage_pool_entry(usage_model_id, usage_entry_id)
+        usage_refresh_task = asyncio.create_task(refresh_usage_entry())
 
         session = await get_session()
 
@@ -1257,7 +1285,7 @@ async def generate_chat_completion(
                     async for chunk in stream:
                         yield chunk
                 finally:
-                    await remove_usage_pool_entry(usage_model_id, usage_entry_id)
+                    await cleanup_usage_entry()
 
             return StreamingResponse(
                 usage_tracked_stream(),
@@ -1291,7 +1319,7 @@ async def generate_chat_completion(
         )
     finally:
         if usage_entry_id and not streaming:
-            await remove_usage_pool_entry(usage_model_id, usage_entry_id)
+            await cleanup_usage_entry()
 
         if not streaming:
             await cleanup_response(r)

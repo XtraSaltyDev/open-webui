@@ -2025,22 +2025,43 @@ async def chat_completion(
         usage_entry_id = f"chat:{metadata.get('chat_id') or 'direct'}:{metadata.get('message_id') or uuid4()}"
         usage_tracked = False
         usage_cleanup_deferred = False
+        usage_refresh_task = None
+
+        async def refresh_usage_entry():
+            while True:
+                await asyncio.sleep(1)
+                if not usage_tracked:
+                    return
+                try:
+                    await add_usage_pool_entry(usage_model_id, usage_entry_id)
+                except Exception as e:
+                    log.debug(f'Error refreshing chat usage entry: {e}')
 
         async def cleanup_usage_entry():
-            nonlocal usage_tracked
-            if usage_tracked:
+            nonlocal usage_refresh_task, usage_tracked
+            was_tracked = usage_tracked
+            usage_tracked = False
+
+            if usage_refresh_task:
+                usage_refresh_task.cancel()
+                try:
+                    await usage_refresh_task
+                except asyncio.CancelledError:
+                    pass
+                usage_refresh_task = None
+
+            if was_tracked:
                 try:
                     await remove_usage_pool_entry(usage_model_id, usage_entry_id)
                 except Exception as e:
                     log.debug(f'Error removing chat usage entry: {e}')
-                finally:
-                    usage_tracked = False
 
         try:
             if usage_model_id:
                 try:
                     await add_usage_pool_entry(usage_model_id, usage_entry_id)
                     usage_tracked = True
+                    usage_refresh_task = asyncio.create_task(refresh_usage_entry())
                 except Exception as e:
                     log.debug(f'Error adding chat usage entry: {e}')
 
