@@ -110,11 +110,13 @@
 	let syncStatsEventData = null;
 
 	let heartbeatInterval = null;
+	let usagePoolInterval = null;
 	let disconnectToastTimer = null;
 	let disconnectWarningShown = false;
 
 	const BREAKPOINT = 768;
 	const DISCONNECT_TOAST_DELAY_MS = 2000;
+	const USAGE_POOL_REFRESH_INTERVAL_MS = 2000;
 
 	const refreshUsagePool = async () => {
 		if (!localStorage.getItem('token')) {
@@ -129,6 +131,20 @@
 		} else {
 			USAGE_POOL.set(null);
 		}
+	};
+
+	const clearUsagePoolInterval = () => {
+		if (usagePoolInterval) {
+			clearInterval(usagePoolInterval);
+			usagePoolInterval = null;
+		}
+	};
+
+	const startUsagePoolInterval = () => {
+		clearUsagePoolInterval();
+		usagePoolInterval = setInterval(() => {
+			refreshUsagePool();
+		}, USAGE_POOL_REFRESH_INTERVAL_MS);
 	};
 
 	const setupSocket = async (enableWebsocket) => {
@@ -207,9 +223,11 @@
 				// Emit user-join event with auth token
 				_socket.emit('user-join', { auth: { token: localStorage.token } });
 				await refreshUsagePool();
+				startUsagePoolInterval();
 			} else {
 				console.warn('No token found in localStorage, user-join event not emitted');
 				USAGE_POOL.set(null);
+				clearUsagePoolInterval();
 			}
 		});
 
@@ -231,6 +249,7 @@
 			console.log(`Socket ${_socket.id} disconnected due to ${reason}`);
 			socketConnected.set(false);
 			USAGE_POOL.set(null);
+			clearUsagePoolInterval();
 
 			// Delay showing the disconnect toast so brief interruptions
 			// (e.g. mobile tab backgrounding) don't flash a nuisance warning
@@ -1181,6 +1200,7 @@
 	});
 
 	onDestroy(() => {
+		clearUsagePoolInterval();
 		bc.close();
 	});
 </script>
