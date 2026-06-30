@@ -1543,4 +1543,29 @@
 		-ms-overflow-style: none; /* IE and Edge */
 		scrollbar-width: none; /* Firefox */
 	}
+
+	/* Daylight typing indicator */
+	@keyframes owui-blink {
+		0%,
+		80%,
+		100% {
+			opacity: 0.25;
+			transform: translateY(0);
+		}
+		40% {
+			opacity: 1;
+			transform: translateY(-2px);
+		}
+	}
+
+	.owui-typing-dot {
+		animation: owui-blink 1.2s infinite;
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		.owui-typing-dot {
+			animation: none;
+			opacity: 0.6;
+		}
+	}
 </style>
