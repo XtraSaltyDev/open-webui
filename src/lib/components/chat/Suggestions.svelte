@@ -31,12 +31,18 @@
 	// Only increase version if something wirklich geändert hat
 	$: getFilteredPrompts(inputValue);
 
+	const getPromptSignature = (prompt) =>
+		JSON.stringify({
+			id: prompt.id ?? null,
+			content: prompt.content ?? '',
+			title: prompt.title ?? null
+		});
+
 	// Helper function to check if arrays are the same
-	// (based on unique IDs oder content)
 	function arraysEqual(a, b) {
 		if (a.length !== b.length) return false;
 		for (let i = 0; i < a.length; i++) {
-			if ((a[i].id ?? a[i].content) !== (b[i].id ?? b[i].content)) {
+			if (getPromptSignature(a[i]) !== getPromptSignature(b[i])) {
 				return false;
 			}
 		}
@@ -61,7 +67,10 @@
 	};
 
 	$: if (suggestionPrompts) {
-		sortedPrompts = [...(suggestionPrompts ?? [])].sort(() => Math.random() - 0.5);
+		const orderedPrompts = [...(suggestionPrompts ?? [])];
+		if (!arraysEqual(sortedPrompts, orderedPrompts)) {
+			sortedPrompts = orderedPrompts;
+		}
 		getFilteredPrompts(inputValue);
 	}
 
