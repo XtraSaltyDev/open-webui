@@ -43,7 +43,12 @@
 	};
 
 	let showMenu = false;
-	$: isModelRunning = isModelInUsagePool($USAGE_POOL, item?.model?.id ?? '');
+	$: isModelRunning = isModelInUsagePool($USAGE_POOL, [
+		item?.model?.id,
+		item?.value,
+		item?.model?.base_model_id,
+		item?.model?.info?.base_model_id
+	]);
 </script>
 
 <button
