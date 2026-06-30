@@ -209,7 +209,7 @@ async def periodic_usage_pool_cleanup():
                 raise Exception('Unable to renew usage pool cleanup lock.')
 
             now = int(time.time())
-            send_usage = False
+            previous_models_in_use = get_models_in_use()
             for model_id, connections in list(USAGE_POOL.items()):
                 # Creating a list of sids to remove if they have timed out
                 expired_sids = [
@@ -225,7 +225,8 @@ async def periodic_usage_pool_cleanup():
                 else:
                     USAGE_POOL[model_id] = connections
 
-                send_usage = True
+            if previous_models_in_use != get_models_in_use():
+                await emit_usage_pool_update()
             await asyncio.sleep(TIMEOUT_DURATION)
     finally:
         release_func()
@@ -239,8 +240,16 @@ app = socketio.ASGIApp(
 
 def get_models_in_use():
     # List models that are currently in use
-    models_in_use = list(USAGE_POOL.keys())
+    models_in_use = sorted(USAGE_POOL.keys())
     return models_in_use
+
+
+def get_usage_pool_snapshot():
+    return {'model_ids': get_models_in_use()}
+
+
+async def emit_usage_pool_update():
+    await sio.emit('usage', get_usage_pool_snapshot())
 
 
 def get_user_id_from_session_pool(sid):
@@ -327,7 +336,12 @@ async def disconnect_user_sessions(user_id: str):
 @sio.on('usage')
 async def usage(sid, data):
     if sid in SESSION_POOL:
-        model_id = data['model']
+        model_id = data.get('model')
+        if not model_id:
+            return
+
+        previous_models_in_use = get_models_in_use()
+
         # Record the timestamp for the last update
         current_time = int(time.time())
 
@@ -336,6 +350,9 @@ async def usage(sid, data):
             **(USAGE_POOL[model_id] if model_id in USAGE_POOL else {}),
             sid: {'updated_at': current_time},
         }
+
+        if previous_models_in_use != get_models_in_use():
+            await emit_usage_pool_update()
 
 
 @sio.event
@@ -809,6 +826,7 @@ async def disconnect(sid, reason=None):
     if sid in SESSION_POOL:
         user = SESSION_POOL[sid]
         del SESSION_POOL[sid]
+        previous_models_in_use = get_models_in_use()
 
         # Clean up USAGE_POOL entries for this session
         for model_id in list(USAGE_POOL.keys()):
@@ -819,6 +837,9 @@ async def disconnect(sid, reason=None):
                     del USAGE_POOL[model_id]
                 else:
                     USAGE_POOL[model_id] = connections
+
+        if previous_models_in_use != get_models_in_use():
+            await emit_usage_pool_update()
 
         await YDOC_MANAGER.remove_user_from_all_documents(sid)
     else:

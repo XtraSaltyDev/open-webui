@@ -20,6 +20,7 @@
 		mobile,
 		socket,
 		socketConnected,
+		USAGE_POOL,
 		chatId,
 		chats,
 		currentChatPage,
@@ -51,7 +52,7 @@
 	import '../app.css';
 	import 'tippy.js/dist/tippy.css';
 
-	import { executeToolServer, getBackendConfig, getModels, getVersion } from '$lib/apis';
+	import { executeToolServer, getBackendConfig, getModels, getUsage, getVersion } from '$lib/apis';
 	import { getSessionUser, updateUserTimezone, userSignOut } from '$lib/apis/auths';
 	import { getAllTags, getChatList } from '$lib/apis/chats';
 	import { chatCompletion } from '$lib/apis/openai';
@@ -114,6 +115,21 @@
 
 	const BREAKPOINT = 768;
 	const DISCONNECT_TOAST_DELAY_MS = 2000;
+
+	const refreshUsagePool = async () => {
+		if (!localStorage.getItem('token')) {
+			USAGE_POOL.set(null);
+			return;
+		}
+
+		const currentUsage = await getUsage(localStorage.token).catch(() => null);
+
+		if (Array.isArray(currentUsage?.model_ids)) {
+			USAGE_POOL.set(currentUsage.model_ids);
+		} else {
+			USAGE_POOL.set(null);
+		}
+	};
 
 	const setupSocket = async (enableWebsocket) => {
 		const _socket = io(`${WEBUI_BASE_URL}` || undefined, {
@@ -190,8 +206,10 @@
 			if (localStorage.getItem('token')) {
 				// Emit user-join event with auth token
 				_socket.emit('user-join', { auth: { token: localStorage.token } });
+				await refreshUsagePool();
 			} else {
 				console.warn('No token found in localStorage, user-join event not emitted');
+				USAGE_POOL.set(null);
 			}
 		});
 
@@ -203,9 +221,16 @@
 			console.log('reconnect_failed');
 		});
 
+		_socket.on('usage', (data) => {
+			if (Array.isArray(data?.model_ids)) {
+				USAGE_POOL.set(data.model_ids);
+			}
+		});
+
 		_socket.on('disconnect', (reason, details) => {
 			console.log(`Socket ${_socket.id} disconnected due to ${reason}`);
 			socketConnected.set(false);
+			USAGE_POOL.set(null);
 
 			// Delay showing the disconnect toast so brief interruptions
 			// (e.g. mobile tab backgrounding) don't flash a nuisance warning

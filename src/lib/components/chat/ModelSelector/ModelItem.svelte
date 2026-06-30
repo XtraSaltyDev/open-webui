@@ -4,8 +4,9 @@
 	import { getContext, tick } from 'svelte';
 	import dayjs from '$lib/dayjs';
 
-	import { mobile, settings, user } from '$lib/stores';
+	import { mobile, settings, user, USAGE_POOL } from '$lib/stores';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { isModelInUsagePool } from '$lib/components/chat/usage';
 
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import { copyToClipboard, sanitizeResponseContent } from '$lib/utils';
@@ -42,6 +43,7 @@
 	};
 
 	let showMenu = false;
+	$: isModelRunning = isModelInUsagePool($USAGE_POOL, item?.model?.id ?? '');
 </script>
 
 <button
@@ -122,10 +124,12 @@
 					{/if}
 				{/if}
 
-				{#if item.model.loaded}
+				{#if item.model.loaded || isModelRunning}
 					<div class="flex items-center translate-y-[0.5px] px-0.5">
 						<Tooltip
-							content={item.model.ollama?.expires_at &&
+							content={isModelRunning
+								? `${$i18n.t('Running')}`
+								: item.model.ollama?.expires_at &&
 							new Date(item.model.ollama?.expires_at * 1000) > new Date()
 								? `${$i18n.t('Unloads {{FROM_NOW}}', {
 										FROM_NOW: dayjs(item.model.ollama?.expires_at * 1000).fromNow()
