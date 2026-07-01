@@ -481,10 +481,10 @@
 	{#if Object.keys(history?.messages ?? {}).length == 0}
 		<ChatPlaceholder modelIds={selectedModels} {atSelectedModel} {onSelect} />
 	{:else}
-			<div class="w-full pt-[18px] md:pt-[26px]">
+			<div class="w-full pt-[18px] md:pt-[26px] px-4 md:px-7">
 				{#key chatId}
 					<section
-						class="mx-auto w-full max-w-[720px] px-[18px] md:px-7"
+						class="mx-auto w-full max-w-[720px]"
 						aria-labelledby="chat-conversation"
 					>
 					<h2 class="sr-only" id="chat-conversation">{$i18n.t('Chat Conversation')}</h2>

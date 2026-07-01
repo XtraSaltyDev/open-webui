@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { toast } from 'svelte-sonner';
-	import dayjs from 'dayjs';
 
 	import { createEventDispatcher, onDestroy } from 'svelte';
 	import { onMount, tick, getContext } from 'svelte';
@@ -32,15 +31,11 @@
 		getMessageContentParts,
 		sanitizeResponseContent,
 		createMessagesList,
-		formatDate,
 		removeDetails,
 		removeAllDetails
 	} from '$lib/utils';
-	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
 	import equal from 'fast-deep-equal';
 
-	import Name from './Name.svelte';
-	import ProfileImage from './ProfileImage.svelte';
 	import Image from '$lib/components/common/Image.svelte';
 	import Tooltip from '$lib/components/common/Tooltip.svelte';
 	import RateComment from './RateComment.svelte';
@@ -657,39 +652,7 @@
 		dir={$settings.chatDirection}
 		style="scroll-margin-top: 3rem;"
 	>
-			<div class={`shrink-0 ltr:mr-[11px] rtl:ml-[11px] @lg:ltr:mr-[14px] @lg:rtl:ml-[14px] flex mt-0.5 `}>
-				<ProfileImage
-					src={`${WEBUI_API_BASE_URL}/models/model/profile/image?id=${model?.id}&lang=${$i18n.language}`}
-					className={'size-7 @lg:size-[30px] assistant-message-profile-image'}
-				/>
-			</div>
-
 		<div class="flex-auto w-0 pl-0 relative">
-			<Name>
-				<Tooltip content={model?.name ?? message.model} placement="top-start">
-					<span id="response-message-model-name" class="line-clamp-1 text-black dark:text-white">
-						{model?.name ?? message.model}
-					</span>
-				</Tooltip>
-
-				{#if message.timestamp}
-					<div
-						class="self-center text-xs font-medium first-letter:capitalize ml-0.5 translate-y-[1px] {($settings?.highContrastMode ??
-						false)
-							? 'dark:text-gray-100 text-gray-900'
-							: 'invisible group-hover:visible transition text-gray-400'}"
-					>
-						<Tooltip content={dayjs(message.timestamp * 1000).format('LLLL')}>
-							<span class="line-clamp-1"
-								>{$i18n.t(formatDate(message.timestamp * 1000), {
-									LOCALIZED_TIME: dayjs(message.timestamp * 1000).format('LT'),
-									LOCALIZED_DATE: dayjs(message.timestamp * 1000).format('L')
-								})}</span
-							>
-						</Tooltip>
-					</div>
-				{/if}
-			</Name>
 
 			<div>
 				<div class="chat-{message.role} w-full min-w-full markdown-prose">
