@@ -63,6 +63,7 @@
 
 	import { WEBUI_BASE_URL, WEBUI_API_BASE_URL, PASTED_TEXT_CHARACTER_LIMIT } from '$lib/constants';
 	import { getOAuthClientAuthorizationUrl } from '$lib/apis/configs';
+	import { isRasterImageContentType, isRasterImageFile } from '$lib/utils/files';
 
 	import { createNoteHandler } from '../notes/utils';
 	import { getSuggestionRenderer } from '../common/RichTextInput/suggestions';
@@ -222,7 +223,7 @@
 
 			for (const item of clipboardItems) {
 				for (const type of item.types) {
-					if (type.startsWith('image/')) {
+					if (isRasterImageContentType(type)) {
 						const blob = await item.getType(type);
 						const file = new File([blob], `clipboard-image.${type.split('/')[1]}`, {
 							type: type
@@ -743,7 +744,7 @@
 				return;
 			}
 
-			if (file['type'].startsWith('image/')) {
+			if (isRasterImageContentType(file.type)) {
 				if (visionCapableModels.length === 0) {
 					toast.error($i18n.t('Selected model(s) do not support image inputs'));
 					return;
@@ -1333,7 +1334,7 @@
 									dir={$settings?.chatDirection ?? 'auto'}
 								>
 									{#each files as file, fileIdx}
-										{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
+										{#if isRasterImageFile(file)}
 											{@const fileUrl =
 												file.url.startsWith('data') || file.url.startsWith('http')
 													? file.url

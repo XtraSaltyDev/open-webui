@@ -53,6 +53,9 @@
 	} from '$lib/stores';
 
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import { withOutputTokenSpeed } from './Messages/responseUsage';
+	import { isRasterImageFile } from '$lib/utils/files';
+	import { getDefaultModelIds, resolveAvailableModelIds } from './modelSelection';
 
 	import {
 		convertMessagesToHistory,
@@ -120,6 +123,8 @@
 	let loading = true;
 
 	const eventTarget = new EventTarget();
+	const responseUsageStartedAt = new Map<string, number>();
+	const getUsageTimestamp = () => globalThis.performance?.now?.() ?? Date.now();
 	let controlPane: Pane | undefined;
 	let controlPaneComponent: ChatControls | undefined;
 
@@ -150,6 +155,19 @@
 	} else {
 		selectedModelIds = selectedModels;
 	}
+
+	const resolveModelIdsForRequest = (modelIds: Array<string | null | undefined>) =>
+		resolveAvailableModelIds(modelIds, $models, getDefaultModelIds($config?.default_models));
+
+	const ensureSelectedModelsForRequest = () => {
+		const resolvedModelIds = resolveModelIdsForRequest(selectedModels);
+
+		if (!equal(selectedModels, resolvedModelIds)) {
+			selectedModels = resolvedModelIds;
+		}
+
+		return resolvedModelIds;
+	};
 
 	let selectedToolIds = [];
 	let selectedSkillIds = [];
@@ -1860,6 +1878,12 @@
 		history.messages[message.id] = message;
 
 		if (done) {
+			const startedAt = responseUsageStartedAt.get(message.id);
+			if (message.usage && startedAt !== undefined) {
+				message.usage = withOutputTokenSpeed(message.usage, getUsageTimestamp() - startedAt);
+			}
+			responseUsageStartedAt.delete(message.id);
+
 			message.done = true;
 
 			if ($settings.responseAutoCopy) {
@@ -1929,13 +1953,14 @@
 	//////////////////////////
 
 	const submitPrompt = async (inputContent, inputFiles) => {
+		const requestModelIds = ensureSelectedModelsForRequest();
 		const _files = structuredClone(inputFiles);
 
 		chatFiles.push(
 			..._files.filter(
 				(item) =>
 					['doc', 'text', 'note', 'chat', 'folder', 'collection'].includes(item.type) ||
-					(item.type === 'file' && !(item?.content_type ?? '').startsWith('image/'))
+					(item.type === 'file' && !isRasterImageFile(item))
 			)
 		);
 		chatFiles = chatFiles.filter(
@@ -1953,7 +1978,7 @@
 			content: inputContent,
 			files: _files.length > 0 ? _files : undefined,
 			timestamp: Math.floor(Date.now() / 1000), // Unix epoch
-			models: selectedModels
+			models: requestModelIds
 		};
 
 		// Add message to history and Set currentId to messageId
@@ -1980,13 +2005,7 @@
 	const submitHandler = async (userPrompt, { _raw = false } = {}) => {
 		console.log('submitHandler', userPrompt, $chatId);
 
-		const _selectedModels = selectedModels.map((modelId) =>
-			$models.map((m) => m.id).includes(modelId) ? modelId : ''
-		);
-
-		if (!equal(selectedModels, _selectedModels)) {
-			selectedModels = _selectedModels;
-		}
+		ensureSelectedModelsForRequest();
 
 		if (pendingOAuthTools.length > 0) {
 			toast.warning($i18n.t('Please connect all required integrations before sending a message'));
@@ -2092,11 +2111,13 @@
 
 		const responseMessageIds: Record<PropertyKey, string> = {};
 		// If modelId is provided, use it, else use selected model
-		let selectedModelIds = modelId
-			? [modelId]
-			: atSelectedModel !== undefined
-				? [atSelectedModel.id]
-				: selectedModels;
+		let selectedModelIds = resolveModelIdsForRequest(
+			modelId ? [modelId] : atSelectedModel !== undefined ? [atSelectedModel.id] : selectedModels
+		);
+
+		if (!modelId && atSelectedModel === undefined && !equal(selectedModels, selectedModelIds)) {
+			selectedModels = selectedModelIds;
+		}
 
 		// Create response messages for each selected model
 		// Build message_ids map: {model_id: assistant_message_id}
@@ -2157,7 +2178,7 @@
 			if (model) {
 				const hasImages = createMessagesList(_history, parentId).some((message) =>
 					message.files?.some(
-						(file) => file.type === 'image' || (file?.content_type ?? '').startsWith('image/')
+						(file) => isRasterImageFile(file)
 					)
 				);
 
@@ -2290,7 +2311,7 @@
 			...(userMessage?.files ?? []).filter(
 				(item) =>
 					['doc', 'text', 'note', 'chat', 'collection', 'folder'].includes(item.type) ||
-					(item.type === 'file' && !(item?.content_type ?? '').startsWith('image/'))
+					(item.type === 'file' && !isRasterImageFile(item))
 			)
 		);
 		// Remove duplicates
@@ -2340,7 +2361,7 @@
 			messages = messages
 				.map((message, idx, arr) => {
 					const imageFiles = (message?.files ?? []).filter(
-						(file) => file.type === 'image' || (file?.content_type ?? '').startsWith('image/')
+						(file) => isRasterImageFile(file)
 					);
 
 					return {
@@ -2431,6 +2452,8 @@
 		// Only send terminal_id if the model has terminal capability enabled
 		const terminalEnabled = model.info?.meta?.capabilities?.terminal ?? true;
 
+		responseUsageStartedAt.set(responseMessageId, getUsageTimestamp());
+
 		const res = await generateOpenAIChatCompletion(
 			localStorage.token,
 			{
@@ -2519,6 +2542,7 @@
 
 			history.messages[responseMessageId] = responseMessage;
 			history.currentId = responseMessageId;
+			responseUsageStartedAt.delete(responseMessageId);
 
 			return null;
 		});
@@ -2526,6 +2550,7 @@
 		if (res) {
 			if (res.error) {
 				await handleOpenAIError(res.error, responseMessage);
+				responseUsageStartedAt.delete(responseMessageId);
 			} else {
 				// Backend returns task_ids (multi-model) or task_id (single model)
 				const newTaskIds = res.task_ids ?? (res.task_id ? [res.task_id] : []);
@@ -2725,9 +2750,10 @@
 			responseMessage.done = false;
 			await tick();
 
-			const model = $models
-				.filter((m) => m.id === (responseMessage?.selectedModelId ?? responseMessage.model))
-				.at(0);
+			const [modelId] = resolveModelIdsForRequest([
+				responseMessage?.selectedModelId ?? responseMessage.model
+			]);
+			const model = $models.filter((m) => m.id === modelId).at(0);
 
 			if (model) {
 				await sendMessageSocket(

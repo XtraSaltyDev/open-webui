@@ -6,6 +6,7 @@
 	import EditPencil from '$lib/components/icons/EditPencil.svelte';
 	import ArrowForward from '$lib/components/icons/ArrowForward.svelte';
 	import { WEBUI_API_BASE_URL } from '$lib/constants';
+	import { isRasterImageFile } from '$lib/utils/files';
 
 	const i18n = getContext('i18n');
 
@@ -28,7 +29,7 @@
 		{#if files.length > 0}
 			<div class="flex items-center gap-1 shrink-0">
 				{#each files as file}
-					{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
+					{#if isRasterImageFile(file)}
 						{@const fileUrl =
 							file.url?.startsWith('data') || file.url?.startsWith('http')
 								? file.url

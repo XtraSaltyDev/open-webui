@@ -268,7 +268,7 @@ select {
 	background: #d98a64;
 }
 
-.daylight-response-actions button,
+.daylight-response-actions button:not(.hidden),
 .daylight-response-actions [aria-label='Regenerate'] {
 	width: 30px;
 	height: 30px;
@@ -279,18 +279,22 @@ select {
 	justify-content: center;
 }
 
-.daylight-response-actions button:hover,
+.daylight-response-actions button.hidden {
+	display: none;
+}
+
+.daylight-response-actions button:not(.hidden):hover,
 .daylight-response-actions [aria-label='Regenerate']:hover {
 	background: rgba(0, 0, 0, 0.05);
 	color: #3c3c38;
 }
 
-.dark .daylight-response-actions button,
+.dark .daylight-response-actions button:not(.hidden),
 .dark .daylight-response-actions [aria-label='Regenerate'] {
 	color: #7a7a74;
 }
 
-.dark .daylight-response-actions button:hover,
+.dark .daylight-response-actions button:not(.hidden):hover,
 .dark .daylight-response-actions [aria-label='Regenerate']:hover {
 	background: rgba(255, 255, 255, 0.06);
 	color: #f2f2ee;

@@ -7,6 +7,7 @@
 	import DocumentPage from '$lib/components/icons/DocumentPage.svelte';
 	import Spinner from '$lib/components/common/Spinner.svelte';
 	import Loader from '$lib/components/common/Loader.svelte';
+	import { isRasterImageContentType } from '$lib/utils/files';
 
 	const i18n = getContext('i18n');
 
@@ -39,7 +40,7 @@
 			...items,
 			...(res ?? []).map((file) => ({
 				...file,
-				type: file?.meta?.content_type?.startsWith('image/') ? 'image' : 'file',
+				type: isRasterImageContentType(file?.meta?.content_type) ? 'image' : 'file',
 				name: file.filename,
 				url: file.id,
 				content_type: file?.meta?.content_type,

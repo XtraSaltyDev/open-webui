@@ -1663,15 +1663,40 @@ async def chat_web_search_handler(request: Request, form_data: dict, extra_param
     return form_data
 
 
+RASTER_IMAGE_CONTENT_TYPES = {
+    'image/apng',
+    'image/avif',
+    'image/bmp',
+    'image/gif',
+    'image/heic',
+    'image/heif',
+    'image/jpeg',
+    'image/jpg',
+    'image/png',
+    'image/tiff',
+    'image/webp',
+}
+
+
+def normalize_content_type(content_type):
+    return (content_type or '').split(';')[0].strip().lower()
+
+
+def is_raster_image_file(file):
+    content_type = normalize_content_type(file.get('content_type'))
+    if content_type:
+        return content_type in RASTER_IMAGE_CONTENT_TYPES
+
+    return file.get('type') == 'image'
+
+
 def get_images_from_messages(message_list):
     images = []
 
     for message in reversed(message_list):
         message_images = []
         for file in message.get('files', []):
-            if file.get('type') == 'image':
-                message_images.append(file.get('url'))
-            elif file.get('content_type', '').startswith('image/'):
+            if is_raster_image_file(file):
                 message_images.append(file.get('url'))
 
         if message_images:
@@ -2378,7 +2403,7 @@ async def process_chat_payload(request, form_data, user, metadata, model):
                 image_files = [
                     f
                     for f in message.get('files', [])
-                    if f.get('type') == 'image' or (f.get('content_type') or '').startswith('image/')
+                    if is_raster_image_file(f)
                 ]
                 if message.get('role') == 'user' and image_files:
                     text_content = message.get('content', '')

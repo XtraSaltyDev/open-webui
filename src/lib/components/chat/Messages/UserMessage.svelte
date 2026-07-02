@@ -7,6 +7,7 @@
 	import { user as _user } from '$lib/stores';
 	import { copyToClipboard as _copyToClipboard, formatDate } from '$lib/utils';
 	import { WEBUI_API_BASE_URL, WEBUI_BASE_URL } from '$lib/constants';
+	import { isRasterImageFile } from '$lib/utils/files';
 	import equal from 'fast-deep-equal';
 
 	import Name from './Name.svelte';
@@ -212,7 +213,7 @@
 									? file.url
 									: `${WEBUI_API_BASE_URL}/files/${file.url}${file?.content_type ? '/content' : ''}`}
 							<div class={($settings?.chatBubble ?? true) ? 'self-end' : ''}>
-								{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
+								{#if isRasterImageFile(file)}
 									<Image src={fileUrl} imageClassName=" max-h-96 rounded-lg" />
 								{:else}
 									<FileItem
@@ -235,7 +236,7 @@
 					{#if (editedFiles ?? []).length > 0}
 						<div class="flex items-center flex-wrap gap-2 -mx-2 mb-1">
 							{#each editedFiles as file, fileIdx}
-								{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
+								{#if isRasterImageFile(file)}
 									{@const fileUrl =
 										file.url?.startsWith('data') || file.url?.startsWith('http')
 											? file.url

@@ -568,6 +568,28 @@ async def get_all_models(request: Request, user: UserModel) -> dict[str, list]:
     return {'data': list(models.values())}
 
 
+def resolve_openai_model_id(model_id: str | None, models: dict, default_models: str | None = None) -> str | None:
+    if model_id in models:
+        return model_id
+
+    for default_model_id in (default_models or '').split(','):
+        default_model_id = default_model_id.strip()
+        if default_model_id and default_model_id in models:
+            return default_model_id
+
+    return next(iter(models), None)
+
+
+def is_current_openai_base_model(model_id: str | None, base_models: list | None) -> bool:
+    base_openai_model_ids = {
+        model.get('id')
+        for model in base_models or []
+        if isinstance(model, dict) and model.get('owned_by') == 'openai' and model.get('id')
+    }
+
+    return not base_openai_model_ids or model_id in base_openai_model_ids
+
+
 @router.get('/models')
 @router.get('/models/{url_idx}')
 async def get_models(request: Request, url_idx: int | None = None, user=Depends(get_verified_user)):
@@ -1101,11 +1123,30 @@ async def generate_chat_completion(
     else:
         await check_model_access(user, None, bypass_filter)
 
-    # Check if model is already in app state cache to avoid expensive get_all_models() call
     models = request.app.state.OPENAI_MODELS
-    if not models or model_id not in models:
-        await get_all_models(request, user=user)
+    if (
+        not models
+        or model_id not in models
+        or not is_current_openai_base_model(model_id, request.app.state.BASE_MODELS)
+    ):
+        await get_all_models(request, user=user, cache_read=False)
         models = request.app.state.OPENAI_MODELS
+
+    resolved_model_id = resolve_openai_model_id(
+        model_id,
+        models,
+        getattr(request.app.state.config, 'DEFAULT_MODELS', None),
+    )
+    if resolved_model_id and resolved_model_id != model_id:
+        log.warning(
+            'Requested OpenAI-compatible model %s is unavailable; falling back to %s',
+            model_id,
+            resolved_model_id,
+        )
+        payload['model'] = resolved_model_id
+        form_data['model'] = resolved_model_id
+        model_id = resolved_model_id
+
     model = models.get(model_id)
 
     if model:

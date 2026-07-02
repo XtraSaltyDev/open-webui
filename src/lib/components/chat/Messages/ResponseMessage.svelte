@@ -58,6 +58,8 @@
 	import StatusHistory from './ResponseMessage/StatusHistory.svelte';
 	import FullHeightIframe from '$lib/components/common/FullHeightIframe.svelte';
 	import OutputEditView from './OutputEditView.svelte';
+	import { formatOutputTokenSpeed, type ResponseUsage } from './responseUsage';
+	import { isRasterImageFile } from '$lib/utils/files';
 
 	interface MessageType {
 		id: string;
@@ -107,6 +109,7 @@
 			load_duration?: number;
 			usage?: unknown;
 		};
+		usage?: ResponseUsage;
 		annotation?: { type: string; rating: number };
 	}
 
@@ -129,6 +132,7 @@
 			}
 		}
 	}
+	$: outputTokenSpeed = formatOutputTokenSpeed(message?.usage);
 
 	export let siblings;
 
@@ -668,7 +672,7 @@
 							>
 								{#each message.files.filter((f) => ['image', 'file'].includes(f.type)) as file}
 									<div>
-										{#if file.type === 'image' || (file?.content_type ?? '').startsWith('image/')}
+										{#if isRasterImageFile(file)}
 											<Image src={file.url} alt={message.content} />
 										{:else}
 											<FileItem
@@ -1458,6 +1462,19 @@
 											</button>
 										</Tooltip>
 									{/each}
+
+									{#if outputTokenSpeed}
+										<Tooltip content={$i18n.t('Output speed')} placement="bottom">
+											<span
+												aria-label={$i18n.t('Output speed')}
+												class="{isLastMessage || ($settings?.highContrastMode ?? false)
+													? 'visible'
+													: 'invisible group-hover:visible'} ml-1 px-1 text-[11px] leading-5 text-gray-500 dark:text-gray-400 whitespace-nowrap tabular-nums"
+											>
+												{outputTokenSpeed}
+											</span>
+										</Tooltip>
+									{/if}
 								{/if}
 							{/if}
 						{/if}
